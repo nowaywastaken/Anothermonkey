@@ -43,7 +43,7 @@ chrome.runtime.onConnect.addListener((port) => {
                     // We call handleGMRequest but it needs to know it's a port-based call
                     // to potentially send progress updates.
                     // For now, we'll just handle it directly here or pass the port.
-                    const response = await handleGMRequest({ ...message, port }, port.sender);
+                    const response = await handleGMRequest({ ...message, port }, port.sender as chrome.runtime.MessageSender);
                     port.postMessage({ type: "load", response });
                 } catch (error: any) {
                     port.postMessage({ type: "error", error: error.message });

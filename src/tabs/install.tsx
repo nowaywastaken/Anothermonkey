@@ -35,19 +35,19 @@ const InstallPage = () => {
                             if (!res.ok) throw new Error(`Failed to fetch ${item.url}`)
                             const text = await res.text()
                             deps[item.url] = text
-                        } catch (e) {
+                        } catch (e: any) {
                             console.error(e)
                             // We allow installation even if deps fail, but warn?
                             // For now, just mark empty or error string
-                            deps[item.url] = `// Failed to load: ${e.message}`
+                            deps[item.url] = `// Failed to load: ${e.message || e}`
                         }
                     }))
                 }
                 setDependencies(deps)
                 setLoading(false)
 
-            } catch (e) {
-                setError("Failed to parse script: " + e.message)
+            } catch (e: any) {
+                setError("Failed to parse script: " + (e.message || e))
                 setLoading(false)
             }
         } else {
@@ -86,8 +86,8 @@ const InstallPage = () => {
         
         // Close tab
         window.close()
-      } catch (e) {
-          setError("Installation failed: " + e.message)
+      } catch (e: any) {
+          setError("Installation failed: " + (e.message || e))
           setInstalling(false)
       }
   }
@@ -155,7 +155,7 @@ const InstallPage = () => {
                     </div>
                 </div>
 
-                {(metadata?.requires.length > 0 || metadata?.resources.length > 0) && (
+                {( (metadata?.requires?.length || 0) > 0 || (metadata?.resources?.length || 0) > 0) && (
                      <div>
                         <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-2">Dependencies</h3>
                          <div className="bg-zinc-950/50 rounded p-3 space-y-2">

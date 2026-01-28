@@ -187,8 +187,7 @@ export async function handleGMRequest(
         const { url, options } = message;
         chrome.tabs.create({
             url: url,
-            active: options?.active !== false,
-            insert: options?.insert
+            active: options?.active !== false
         });
         return { success: true };
     }
@@ -197,11 +196,12 @@ export async function handleGMRequest(
         if (!tabId) return { error: "No tab ID" }
         const { caption, id } = message;
         
-        if (!menuCommands.has(tabId)) {
-            menuCommands.set(tabId, []);
+        let commands = menuCommands.get(tabId);
+        if (!commands) {
+            commands = [];
+            menuCommands.set(tabId, commands);
         }
         
-        const commands = menuCommands.get(tabId);
         commands.push({ id, caption, scriptId, tabId });
         
         return { success: true };

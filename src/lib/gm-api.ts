@@ -13,6 +13,7 @@ export const GM_API_CODE = `
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ ...data, action, scriptId: SCRIPT_ID }, (response) => {
         if (chrome.runtime.lastError) {
+          console.error("GM API Error:", chrome.runtime.lastError);
           resolve(null);
         } else if (response && response.error) {
           reject(response.error);
@@ -27,7 +28,7 @@ export const GM_API_CODE = `
   window.GM_info = {
       script: {
           id: SCRIPT_ID,
-          name: "Userscript", // Should ideally be passed in metadata
+          name: "Userscript", 
           version: "0.1"
       },
       scriptHandler: "AnotherMonkey",
@@ -99,12 +100,53 @@ export const GM_API_CODE = `
     };
   };
 
-  // GM_log
+  // Value APIs (Sync using cache, Async updates background)
+  window.GM_setValue = function(key, value) {
+      valueCache[key] = value;
+      sendMessage("GM_setValue", { key, value });
+  };
+
+  window.GM_getValue = function(key, defaultValue) {
+      return valueCache.hasOwnProperty(key) ? valueCache[key] : defaultValue;
+  };
+
+  window.GM_deleteValue = function(key) {
+      delete valueCache[key];
+      sendMessage("GM_deleteValue", { key });
+  };
+
+  window.GM_listValues = function() {
+      return Object.keys(valueCache);
+  };
+
+  // Style API
+  window.GM_addStyle = function(css) {
+      const style = document.createElement('style');
+      style.textContent = css;
+      (document.head || document.documentElement).appendChild(style);
+      return style;
+  };
+
+  // Resource APIs
+  window.GM_getResourceText = function(name) {
+      return resourceCache[name] ? resourceCache[name].content : null;
+  };
+
+  window.GM_getResourceURL = function(name) {
+      if (!resourceCache[name]) return null;
+      if (resourceCache[name].content) {
+          const blob = new Blob([resourceCache[name].content]);
+          return URL.createObjectURL(blob);
+      }
+      return resourceCache[name].url;
+  };
+
+  // Logging
   window.GM_log = function(message) {
     console.log("[%cGM_log%c] " + message, "color: #10b981; font-weight: bold", "");
   };
 
-  // GM_notification
+  // Notifications
   window.GM_notification = function(details, ondone) {
     if (typeof details === 'string') {
         details = { text: details };
@@ -112,12 +154,12 @@ export const GM_API_CODE = `
     sendMessage("GM_notification", { details }).then(ondone);
   };
 
-  // GM_openInTab
+  // Tabs
   window.GM_openInTab = function(url, options) {
     sendMessage("GM_openInTab", { url, options });
   };
 
-  // Modern API
+  // Modern GM.* API
   window.GM = window.GM || {};
   window.GM.getValue = async (key, defaultValue) => window.GM_getValue(key, defaultValue);
   window.GM.setValue = async (key, value) => window.GM_setValue(key, value);
@@ -132,7 +174,7 @@ export const GM_API_CODE = `
   window.GM.openInTab = (url, options) => window.GM_openInTab(url, options);
   window.GM.info = window.GM_info;
 
-  // GM_registerMenuCommand
+  // Menu Commands
   const menuCommandListeners = new Map();
   window.GM_registerMenuCommand = function(caption, onClick) {
      const id = Math.random().toString(36).substring(2);
@@ -141,7 +183,7 @@ export const GM_API_CODE = `
      return id;
   };
 
-  // Listen for menu command clicks from background
+  // Background Messages Listener
   chrome.runtime.onMessage.addListener((message) => {
       if (message.action === "GM_menuCommandClicked" && message.id) {
           const listener = menuCommandListeners.get(message.id);

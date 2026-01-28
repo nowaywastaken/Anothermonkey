@@ -22,6 +22,7 @@ export interface UserScript {
   code: string;
   metadata: ScriptMetadata;
   lastModified: number;
+  preferredWorld?: 'USER_SCRIPT' | 'MAIN';
   dependencyCache?: {
       [url: string]: string;
   };

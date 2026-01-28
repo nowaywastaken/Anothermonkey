@@ -5,7 +5,7 @@ import type { UserScriptInjection } from "./types"
 export async function syncScripts() {
   console.log("Syncing scripts to browser...")
   try {
-    const scripts = await db.scripts.where("enabled").equals(true).toArray()
+    const scripts = await db.scripts.where("enabled").equals(1 as any).toArray()
     
     // @ts-ignore
     if (!chrome.userScripts) {
@@ -23,6 +23,12 @@ export async function syncScripts() {
     }
 
     const scriptsToRegister = await Promise.all(scripts.map(async (script): Promise<UserScriptInjection> => {
+      // Determine world: if @grant is none, it might want to be in MAIN world
+      const isGrantNone = script.metadata.grants.length === 0 || 
+                         (script.metadata.grants.length === 1 && script.metadata.grants[0] === "none");
+      
+      const world = (isGrantNone || script.preferredWorld === "MAIN") ? "MAIN" : "USER_SCRIPT";
+
       // Prepend the script ID so the API knows which script is running
       const idInjection = `const GM_SCRIPT_ID = "${script.id}";\n`;
       
@@ -32,7 +38,7 @@ export async function syncScripts() {
       
       // Prepare resources
       const resources: Record<string, { content?: string, url: string }> = {};
-      script.metadata.resources.forEach(res => {
+      script.metadata.resources.forEach((res: any) => {
           resources[res.name] = {
               url: res.url,
               content: script.dependencyCache?.[res.url]
@@ -49,7 +55,7 @@ export async function syncScripts() {
       jsToInject.push({ code: apiCode });
       
       // 2. Add @requires from cache
-      script.metadata.requires.forEach(url => {
+      script.metadata.requires.forEach((url: string) => {
           const content = script.dependencyCache?.[url];
           if (content) {
               jsToInject.push({ code: content });
@@ -102,7 +108,7 @@ export async function syncScripts() {
         excludeMatches: script.metadata.excludes.filter(e => !e.startsWith("/") || !e.endsWith("/")),
         js: jsToInject,
         runAt: script.metadata.runAt,
-        world: "USER_SCRIPT"
+        world: world as any
       }
     }))
 
@@ -112,7 +118,7 @@ export async function syncScripts() {
     scriptsToRegister.forEach(s => {
         const script = scripts.find(orig => orig.id === s.id);
         if (script?.metadata.includes.some(i => i.startsWith("/") && i.endsWith("/"))) {
-            if (s.matches.length === 0 || (s.matches.length === 1 && s.matches[0] === "")) {
+            if (!s.matches || s.matches.length === 0 || (s.matches.length === 1 && s.matches[0] === "")) {
                 s.matches = ["<all_urls>"];
             }
         }
@@ -218,7 +224,7 @@ async function injectIntoExistingTabs(script: any) {
             const valueMap = values.reduce((acc, v) => ({ ...acc, [v.key]: v.value }), {});
             
             const resources: Record<string, { content?: string, url: string }> = {};
-            script.metadata.resources.forEach(res => {
+            script.metadata.resources.forEach((res: any) => {
                 resources[res.name] = {
                     url: res.url,
                     content: script.dependencyCache?.[res.url]
@@ -229,7 +235,7 @@ async function injectIntoExistingTabs(script: any) {
             const apiCode = idInjection + dataInjection + GM_API_CODE;
             
             let fullCode = apiCode + "\n";
-            script.metadata.requires.forEach(url => {
+            script.metadata.requires.forEach((url: string) => {
                 const content = script.dependencyCache?.[url];
                 if (content) fullCode += content + "\n";
             });
