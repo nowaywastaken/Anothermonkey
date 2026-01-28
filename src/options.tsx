@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { db } from "../lib/db"
-import { parseMetadata } from "../lib/parser"
-import { ScriptList } from "../components/ScriptList"
-import { ScriptEditor } from "../components/ScriptEditor"
-import { type UserScript } from "../lib/types"
+import { db } from "~lib/db"
+import { parseMetadata } from "~lib/parser"
+import { ScriptList } from "~components/ScriptList"
+import { ScriptEditor } from "~components/ScriptEditor"
+import { type UserScript } from "~lib/types"
 
-import "../style.css"
+import "~style.css"
 
 const DEFAULT_SCRIPT = `// ==UserScript==
 // @name         New Script

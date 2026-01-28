@@ -18,6 +18,7 @@ export function parseMetadata(code: string): ScriptMetadata {
     excludes: [],
     includes: [],
     grants: [],
+    connects: [],
     requires: [],
     resources: [],
     runAt: "document_idle"
@@ -59,6 +60,9 @@ export function parseMetadata(code: string): ScriptMetadata {
         break
       case "grant":
         metadata.grants.push(value)
+        break
+      case "connect":
+        metadata.connects.push(value)
         break
       case "require":
         metadata.requires.push(value)

@@ -8,9 +8,10 @@ export interface ScriptMetadata {
   excludes: string[];
   includes: string[];
   grants: string[];
+  connects: string[];
   runAt: 'document_start' | 'document_end' | 'document_idle';
   requires: string[];
-  resources: { name: string; url: string }[];
+  resources: { name: string; url: string; content?: string }[];
   updateURL?: string;
   downloadURL?: string;
 }
@@ -21,4 +22,19 @@ export interface UserScript {
   code: string;
   metadata: ScriptMetadata;
   lastModified: number;
+}
+
+export interface UserScriptInjection {
+  id: string;
+  js: Array<{ code: string } | { file: string }>;
+  matches?: string[];
+  excludeMatches?: string[];
+  runAt?: 'document_start' | 'document_end' | 'document_idle';
+  world?: 'USER_SCRIPT' | 'MAIN';
+}
+
+export interface GMValue {
+  scriptId: string;
+  key: string;
+  value: any;
 }

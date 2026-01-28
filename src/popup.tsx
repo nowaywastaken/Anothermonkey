@@ -1,19 +1,37 @@
 import React, { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { db } from "../lib/db"
-import { matchesUrl } from "../lib/matcher"
-import "../style.css"
-import { Power, Settings, FileCode } from "lucide-react"
+import { db } from "~lib/db"
+import { matchesUrl } from "~lib/matcher"
+import "~style.css"
+import { Power, Settings, FileCode, Command } from "lucide-react"
 import clsx from "clsx"
+
+interface MenuCommand {
+    id: string;
+    caption: string;
+    scriptId: string;
+    tabId: number;
+}
 
 const PopupIndex = () => {
   const [currentUrl, setCurrentUrl] = useState<string>("")
+  const [currentTabId, setCurrentTabId] = useState<number | null>(null)
+  const [menuCommands, setMenuCommands] = useState<MenuCommand[]>([])
   const allScripts = useLiveQuery(() => db.scripts.toArray(), []) || []
   
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.url) {
-        setCurrentUrl(tabs[0].url)
+      const tab = tabs[0]
+      if (tab?.url && tab?.id) {
+        setCurrentUrl(tab.url)
+        setCurrentTabId(tab.id)
+        
+        // Fetch menu commands
+        chrome.runtime.sendMessage({ action: "get_menu_commands", tabId: tab.id }, (response) => {
+            if (response && response.commands) {
+                setMenuCommands(response.commands)
+            }
+        })
       }
     })
   }, [])
@@ -24,6 +42,17 @@ const PopupIndex = () => {
   const toggleScript = async (id: string, enabled: boolean) => {
       await db.scripts.update(id, { enabled })
       chrome.runtime.sendMessage({ action: "sync_scripts" })
+  }
+
+  const executeCommand = (cmd: MenuCommand) => {
+      if (currentTabId) {
+          chrome.runtime.sendMessage({ 
+              action: "execute_menu_command", 
+              targetTabId: currentTabId, 
+              commandId: cmd.id 
+          })
+          window.close() // Close popup after action
+      }
   }
 
   const openDashboard = () => {
@@ -43,6 +72,24 @@ const PopupIndex = () => {
       </div>
 
       <div className="space-y-4">
+          {menuCommands.length > 0 && (
+              <div>
+                  <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Script Commands</h2>
+                  <div className="space-y-1">
+                      {menuCommands.map(cmd => (
+                          <button 
+                            key={cmd.id}
+                            onClick={() => executeCommand(cmd)}
+                            className="w-full text-left flex items-center gap-2 px-2 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-sm text-zinc-200 transition-colors"
+                          >
+                              <Command size={14} className="text-emerald-500"/>
+                              {cmd.caption}
+                          </button>
+                      ))}
+                  </div>
+              </div>
+          )}
+
           <div>
               <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Active on this page</h2>
               {activeScripts.length > 0 ? (
