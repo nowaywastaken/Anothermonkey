@@ -84,6 +84,14 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     }
 });
 
+// Listener for notification clicks
+chrome.notifications.onClicked.addListener((notificationId) => {
+    if (typeof notificationId === 'string' && notificationId.startsWith('connect-blocked::')) {
+        chrome.runtime.openOptionsPage();
+        chrome.notifications.clear(notificationId);
+    }
+});
+
 // Set up periodic update check (e.g., every 24 hours)
 chrome.alarms.create("check_updates", { periodInMinutes: 24 * 60 });
 

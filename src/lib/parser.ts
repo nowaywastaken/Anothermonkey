@@ -45,6 +45,13 @@ export function parseMetadata(code: string): ScriptMetadata {
   const metadata = createDefaultMetadata();
   const lineRegex = /^\s*\/\/\s*@([\w:-]+)(?:\s+(.*))?$/;
 
+  // Temporary storage for localized values
+  const localized: { [key: string]: { [locale: string]: string } } = {
+    name: {},
+    description: {},
+    author: {}
+  };
+
   for (const line of lines) {
     const lineMatch = line.trim().match(lineRegex)
     if (!lineMatch) continue
@@ -52,15 +59,17 @@ export function parseMetadata(code: string): ScriptMetadata {
     const key = lineMatch[1].trim()
     const value = lineMatch[2] ? lineMatch[2].trim() : "";
 
-    // Get the base key for localized keys like @name:en, @description:fr
-    const baseKey = key.split(':', 1)[0];
+    const [baseKey, locale] = key.split(':', 2);
 
     switch (baseKey) {
       case "name":
-      case "namespace":
-      case "version":
       case "description":
       case "author":
+        localized[baseKey][locale || 'default'] = value;
+        break;
+
+      case "namespace":
+      case "version":
       case "updateURL":
       case "downloadURL":
         metadata[baseKey] = value;
@@ -114,6 +123,26 @@ export function parseMetadata(code: string): ScriptMetadata {
         break;
     }
   }
+
+  // Helper to select the best localized string
+  function selectLocalized(values: { [locale: string]: string }, fallback?: string): string {
+    if (typeof navigator === 'undefined') return values['default'] || fallback || '';
+
+    const lang = navigator.language; // e.g., "en-US"
+    if (values[lang]) {
+        return values[lang];
+    }
+    const langPart = lang.split('-')[0]; // e.g., "en"
+    if (values[langPart]) {
+        return values[langPart];
+    }
+    return values['default'] || fallback || '';
+  }
+
+  metadata.name = selectLocalized(localized.name);
+  metadata.description = selectLocalized(localized.description);
+  metadata.author = selectLocalized(localized.author);
+
 
   // A script is not valid without a name.
   if (!metadata.name) {

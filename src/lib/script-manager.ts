@@ -155,11 +155,12 @@ export async function syncScripts() {
         excludeMatches: script.metadata.excludes.filter(e => !e.startsWith("/") || !e.endsWith("/")),
         js,
         runAt: script.metadata.runAt,
-        worldId: script.id, // Isolate each script in its own world
       };
 
       if (world === "MAIN") {
           registration.world = "MAIN";
+      } else {
+          registration.worldId = script.id; // Isolate each script in its own world
       }
       return registration;
     }

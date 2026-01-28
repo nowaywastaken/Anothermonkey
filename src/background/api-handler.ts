@@ -73,6 +73,18 @@ export async function handleGMRequest(
         if (!await checkConnect(scriptId, details.url)) {
              const error = { name: "ConnectError", message: `Request to ${details.url} blocked by @connect rule.`};
              message.port.postMessage({ type: "error", error });
+
+            // Create a notification to inform the user
+            const notificationId = `connect-blocked::${scriptId}::${details.url}`;
+            const script = await db.scripts.get(scriptId);
+            chrome.notifications.create(notificationId, {
+                type: "basic",
+                iconUrl: chrome.runtime.getURL("assets/icon.png"),
+                title: `[${script?.metadata.name}] Request Blocked`,
+                message: `A request to ${details.url} was blocked. Click to manage script permissions.`,
+                priority: 2
+            });
+
              return;
         }
 
