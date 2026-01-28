@@ -81,15 +81,22 @@ const ANMON_matchPattern = (function() {
     });
   }
 
+  // Injected data from script-manager
+  const SCRIPT_METADATA = typeof GM_SCRIPT_METADATA !== 'undefined' ? GM_SCRIPT_METADATA : {};
+
   // GM_info
   window.GM_info = {
       script: {
-          id: SCRIPT_ID,
-          name: "Userscript", 
-          version: "0.1"
+          ...SCRIPT_METADATA,
+          id: SCRIPT_ID, // The ID is the generated UUID, not from metadata
+          resources: Object.keys(resourceCache).map(name => ({
+              name: name,
+              url: resourceCache[name].url
+          })),
+          'run-at': SCRIPT_METADATA.runAt || 'document_idle',
       },
       scriptHandler: "AnotherMonkey",
-      version: "0.1.0"
+      version: "0.0.1" // The extension's version
   };
 
   // GM_xmlhttpRequest

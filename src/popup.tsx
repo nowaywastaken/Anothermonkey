@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { db } from "~lib/db"
+import { matchesUrl } from "~lib/matcher"
 import { Power, Settings, ExternalLink, Menu as MenuIcon } from "lucide-react"
 import clsx from "clsx"
 
@@ -98,9 +99,8 @@ const PopupIndex = () => {
             <div className="px-2 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Scripts for this site</div>
             <div className="space-y-1 mt-1">
                 {scripts.filter(s => {
-                    // Very basic match check
                     if (!activeTab?.url) return false;
-                    return s.metadata.matches.some(m => m === "<all_urls>" || activeTab.url?.includes(m.replace("*", "")))
+                    return matchesUrl([...s.metadata.matches, ...s.metadata.includes], activeTab.url) && !matchesUrl(s.metadata.excludes, activeTab.url);
                 }).map(script => (
                     <div key={script.id} className="flex items-center justify-between px-3 py-2 hover:bg-zinc-900 rounded group">
                         <div className="flex flex-col overflow-hidden">

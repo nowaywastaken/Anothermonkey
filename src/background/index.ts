@@ -68,9 +68,7 @@ syncScripts()
 checkForUpdates() // Also check on startup
 
 // Configure the User Script world
-// @ts-ignore
 if (chrome.userScripts && chrome.userScripts.configureWorld) {
-    // @ts-ignore
     chrome.userScripts.configureWorld({
         messaging: true,
         csp: "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; object-src 'none'"

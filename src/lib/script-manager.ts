@@ -6,38 +6,38 @@ import type { UserScript, UserScriptInjection } from "./types"
 export async function syncScripts() {
   console.log("Syncing scripts to browser...")
   try {
-    const scripts = await db.scripts.where("enabled").equals(1 as any).toArray()
-    
-    // @ts-ignore
     if (!chrome.userScripts) {
-        console.error("chrome.userScripts API is not available. Make sure you are on Chrome 120+ and have the permission.");
-        return;
+      console.error(
+        "chrome.userScripts API is not available. Make sure you are on Chrome 120+ and have the permission."
+      )
+      return
     }
 
-    // Unregister all first
-    // @ts-ignore
-    const existing = await chrome.userScripts.getScripts()
-    const existingIds = existing.map((s: any) => s.id)
-    if (existingIds.length > 0) {
-        // @ts-ignore
-        await chrome.userScripts.unregister(existingIds)
-    }
+    // 1. Get scripts from DB and browser
+    const dbScripts = await db.scripts.where("enabled").equals(1 as any).toArray()
+    const registeredScripts = await chrome.userScripts.getScripts()
 
-    const scriptsToRegister = await Promise.all(scripts.map(async (script): Promise<UserScriptInjection> => {
-      // Determine world: if @grant is none, it might want to be in MAIN world
-      const isGrantNone = script.metadata.grants.length === 0 || 
+    const dbScriptIds = new Set(dbScripts.map((s) => s.id))
+    const registeredScriptIds = new Set(registeredScripts.map((s) => s.id))
+
+    // 2. Determine scripts to add, update, and remove
+    const scriptsToAdd = dbScripts.filter((s) => !registeredScriptIds.has(s.id))
+    const scriptsToUpdate = dbScripts.filter((s) => registeredScriptIds.has(s.id))
+    const scriptIdsToRemove = [...registeredScriptIds].filter(
+      (id) => !dbScriptIds.has(id)
+    )
+    
+    // 3. Helper to build registration object
+    const buildRegistration = async (script: UserScript): Promise<chrome.userScripts.RegisteredUserScriptOptions> => {
+       const isGrantNone = script.metadata.grants.length === 0 || 
                          (script.metadata.grants.length === 1 && script.metadata.grants[0] === "none");
       
       const world = (isGrantNone || script.preferredWorld === "MAIN") ? "MAIN" : "USER_SCRIPT";
 
-      // Prepend the script ID so the API knows which script is running
       const idInjection = `const GM_SCRIPT_ID = "${script.id}";\n`;
-      
-      // Fetch values for this script to support sync GM_getValue
       const values = await db.values.where("scriptId").equals(script.id).toArray();
       const valueMap = values.reduce((acc, v) => ({ ...acc, [v.key]: v.value }), {});
       
-      // Prepare resources
       const resources: Record<string, { content?: string, url: string }> = {};
       script.metadata.resources.forEach((res: any) => {
           resources[res.name] = {
@@ -46,16 +46,13 @@ export async function syncScripts() {
           };
       });
 
+      const infoInjection = `const GM_SCRIPT_METADATA = ${JSON.stringify(script.metadata)};\n`;
       const dataInjection = `const GM_PRESET_VALUES = ${JSON.stringify(valueMap)};\nconst GM_PRESET_RESOURCES = ${JSON.stringify(resources)};\n`;
-      
-      const apiCode = idInjection + dataInjection + GM_API_CODE;
+      const apiCode = idInjection + infoInjection + dataInjection + GM_API_CODE;
 
-      const jsToInject = [];
-      
-      // 1. Add API shim
+      const jsToInject: {code: string}[] = [];
       jsToInject.push({ code: apiCode });
       
-      // 2. Add @requires from cache
       script.metadata.requires.forEach((url: string) => {
           const content = script.dependencyCache?.[url];
           if (content) {
@@ -63,74 +60,69 @@ export async function syncScripts() {
           }
       });
       
-      // 3. Add main script code with pre-check wrapper if necessary
       let finalCode = script.code;
-      
-      // We need a pre-check if there are any @include or @exclude rules,
-      // or if there are regex-based @includes which forces a wide @match.
       const needsPreCheck = script.metadata.includes.length > 0 || script.metadata.excludes.length > 0;
-      
       if (needsPreCheck) {
           const allIncludes = JSON.stringify(script.metadata.includes);
           const allExcludes = JSON.stringify(script.metadata.excludes);
-
           const wrapper = `
 (function() {
-  // This wrapper performs runtime checks for @include and @exclude rules.
   const currentUrl = window.location.href;
   const includes = ${allIncludes};
   const excludes = ${allExcludes};
-
-  // The ANMON_matchPattern function is globally available from the injected GM_API code.
   const isIncluded = includes.length === 0 || includes.some(p => ANMON_matchPattern(p, currentUrl));
   const isExcluded = excludes.some(p => ANMON_matchPattern(p, currentUrl));
-
-  if (isExcluded || !isIncluded) {
-    return;
-  }
-
-  // If we've passed all checks, execute the original script code.
+  if (isExcluded || !isIncluded) return;
 `;
           finalCode = wrapper + script.code + "\n})();";
       }
-
-
       jsToInject.push({ code: finalCode });
 
-      return {
+      let matches = (script.metadata.matches.length > 0 || script.metadata.includes.length > 0) ? [...script.metadata.matches, ...script.metadata.includes.filter(i => !i.startsWith("/") || !i.endsWith("/"))] : ["<all_urls>"];
+      if (script.metadata.includes.some(i => i.startsWith("/") && i.endsWith("/"))) {
+          if (matches.length === 0 || (matches.length === 1 && matches[0] === "")) {
+              matches = ["<all_urls>"];
+          }
+      }
+
+      const registration: chrome.userScripts.RegisteredUserScriptOptions = {
         id: script.id,
-        matches: (script.metadata.matches.length > 0 || script.metadata.includes.length > 0) ? [...script.metadata.matches, ...script.metadata.includes.filter(i => !i.startsWith("/") || !i.endsWith("/"))] : ["<all_urls>"],
-        // If it has regex includes, we MUST match <all_urls> to be safe, or at least be broad
+        matches,
         excludeMatches: script.metadata.excludes.filter(e => !e.startsWith("/") || !e.endsWith("/")),
         js: jsToInject,
         runAt: script.metadata.runAt,
-        world: world as any
+      };
+
+      if (world === "MAIN") {
+          registration.world = "MAIN";
       }
-    }))
+      return registration;
+    }
 
-    // If there are regex includes, we might need to broaden the matches to <all_urls>
-    // but the userScripts API register call will handle the 'matches' field we provide.
-    // Let's ensure if regex includes exist, we at least match all_urls if no glob matches are present.
-    scriptsToRegister.forEach(s => {
-        const script = scripts.find(orig => orig.id === s.id);
-        if (script?.metadata.includes.some(i => i.startsWith("/") && i.endsWith("/"))) {
-            if (!s.matches || s.matches.length === 0 || (s.matches.length === 1 && s.matches[0] === "")) {
-                s.matches = ["<all_urls>"];
-            }
-        }
-    });
-
-    if (scriptsToRegister.length > 0) {
-        // @ts-ignore
-        await chrome.userScripts.register(scriptsToRegister)
-        
-        // Immediate injection for existing tabs
-        for (const script of scripts) {
-            await injectIntoExistingTabs(script);
-        }
+    // 4. Perform API calls
+    if (scriptIdsToRemove.length > 0) {
+        await chrome.userScripts.unregister({ ids: scriptIdsToRemove });
+        console.log(`Unregistered ${scriptIdsToRemove.length} scripts.`);
     }
     
-    console.log(`Synced ${scriptsToRegister.length} scripts.`)
+    if (scriptsToAdd.length > 0) {
+        const regs = await Promise.all(scriptsToAdd.map(buildRegistration));
+        await chrome.userScripts.register(regs);
+        console.log(`Registered ${scriptsToAdd.length} new scripts.`);
+    }
+
+    if (scriptsToUpdate.length > 0) {
+        const regs = await Promise.all(scriptsToUpdate.map(buildRegistration));
+        await chrome.userScripts.update(regs);
+        console.log(`Updated ${scriptsToUpdate.length} existing scripts.`);
+    }
+    
+    // 5. Immediate injection for all enabled scripts to ensure consistency
+    for (const script of dbScripts) {
+        await injectIntoExistingTabs(script);
+    }
+    
+    console.log(`Sync complete. Added: ${scriptsToAdd.length}, Updated: ${scriptsToUpdate.length}, Removed: ${scriptIdsToRemove.length}.`)
   } catch (error) {
     console.error("Failed to sync scripts:", error)
   }
@@ -203,7 +195,10 @@ function isNewerVersion(newVer: string, oldVer: string): boolean {
 }
 
 async function injectIntoExistingTabs(script: UserScript) {
-    const allTabs = await chrome.tabs.query({});
+    const allTabs = await chrome.tabs.query({
+        // Avoid injecting into URLs that are not supported like chrome://, about:, etc.
+        url: ["http://*/*", "https://*/*", "file://*/*"]
+    });
     
     const patternsToMatch = [...script.metadata.matches, ...script.metadata.includes];
     const patternsToExclude = script.metadata.excludes;
@@ -215,9 +210,6 @@ async function injectIntoExistingTabs(script: UserScript) {
 
         if (!shouldRun) continue;
         
-        // Basic check if already injected? 
-        // Tampermonkey usually has a way to avoid double injection.
-        // For now, we just try to inject.
         try {
             // We need to inject the API code + requires + script code
             const idInjection = `const GM_SCRIPT_ID = "${script.id}";\n`;
@@ -234,8 +226,9 @@ async function injectIntoExistingTabs(script: UserScript) {
                 };
             });
 
+            const infoInjection = `const GM_SCRIPT_METADATA = ${JSON.stringify(script.metadata)};\n`;
             const dataInjection = `const GM_PRESET_VALUES = ${JSON.stringify(valueMap)};\nconst GM_PRESET_RESOURCES = ${JSON.stringify(resources)};\n`;
-            const apiCode = idInjection + dataInjection + GM_API_CODE;
+            const apiCode = idInjection + infoInjection + dataInjection + GM_API_CODE;
             
             let fullCode = apiCode + "\n";
             script.metadata.requires.forEach((url: string) => {
@@ -244,30 +237,28 @@ async function injectIntoExistingTabs(script: UserScript) {
             });
             fullCode += script.code;
 
+            // Background script can keep a map of tabId -> Set<scriptId> of injected scripts
+            // to prevent double injection more reliably. For now, we omit the check as `executeScript`
+            // can be called multiple times without side effects in many cases.
+            
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 func: (code) => {
-                    // A simple flag to avoid double injection in the same tab session
-                    const injectionMarker = `ANMON_INJECTED_${script.id}`;
-                    if ((window as any)[injectionMarker]) return;
-                    (window as any)[injectionMarker] = true;
-
-                    const scriptEl = document.createElement('script');
-                    scriptEl.textContent = code;
-                    (document.head || document.documentElement).appendChild(scriptEl);
-                    scriptEl.remove();
+                    try {
+                        // Directly execute the code in the isolated world.
+                        eval(code);
+                    } catch (e) {
+                        console.error("Error executing script in isolated world:", e);
+                    }
                 },
                 args: [fullCode],
-                world: "MAIN" // Using MAIN world for executeScript to have better access if needed, 
-                             // but userScripts uses USER_SCRIPT world. 
-                             // To be consistent with USER_SCRIPT world, we should use ISOLATED world.
-                             // However, ISOLATED world cannot access MAIN world variables.
-                             // The report suggests that executeScript fallback runs in ISOLATED world.
+                world: "ISOLATED"
             });
         } catch (e) {
-            // Ignore errors from injecting into privileged pages like chrome://
-            if (!e.message.includes("Cannot access") && !e.message.includes("Missing host permission")) {
-                 console.error(`Failed to inject into tab ${tab.id}:`, e);
+            // Ignore errors from injecting into privileged pages.
+            // The url filter in chrome.tabs.query should prevent most of these.
+            if (!e.message.includes("Cannot access") && !e.message.includes("Missing host permission") && !e.message.includes("No tab with id")) {
+                 console.error(`Failed to inject script "${script.metadata.name}" into tab ${tab.id}:`, e);
             }
         }
     }
