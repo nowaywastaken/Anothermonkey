@@ -35,6 +35,7 @@ export function parseMetadata(code: string): ScriptMetadata {
 
     switch (key) {
       case "name":
+      case "name:zh-CN": // Basic support for localized names
         metadata.name = value
         break
       case "namespace":
@@ -44,6 +45,7 @@ export function parseMetadata(code: string): ScriptMetadata {
         metadata.version = value
         break
       case "description":
+      case "description:zh-CN":
         metadata.description = value
         break
       case "author":
@@ -59,27 +61,32 @@ export function parseMetadata(code: string): ScriptMetadata {
         metadata.includes.push(value)
         break
       case "grant":
-        metadata.grants.push(value)
+        if (!metadata.grants.includes(value)) {
+            metadata.grants.push(value)
+        }
         break
       case "connect":
-        metadata.connects.push(value)
+        if (!metadata.connects.includes(value)) {
+            metadata.connects.push(value)
+        }
         break
       case "require":
         metadata.requires.push(value)
         break
       case "resource":
         // Resource format: name url
-        const [resName, ...resUrlParts] = value.split(/\s+/)
-        if (resName && resUrlParts.length > 0) {
+        const resMatch = value.match(/^(\S+)\s+(.+)$/)
+        if (resMatch) {
             metadata.resources.push({
-                name: resName,
-                url: resUrlParts.join(" ")
+                name: resMatch[1],
+                url: resMatch[2]
             })
         }
         break
       case "run-at":
-        if (value === "document-start" || value === "document-end" || value === "document-idle") {
-           metadata.runAt = value.replace("-", "_") as any
+        const runAtValue = value.replace(/-/g, "_")
+        if (runAtValue === "document_start" || runAtValue === "document_end" || runAtValue === "document_idle") {
+           metadata.runAt = runAtValue as any
         }
         break
       case "updateURL":

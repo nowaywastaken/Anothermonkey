@@ -1,6 +1,10 @@
 export const GM_API_CODE = `
 (function() {
-  const SCRIPT_ID = document.currentScript?.dataset?.scriptId || (typeof GM_SCRIPT_ID !== 'undefined' ? GM_SCRIPT_ID : "unknown");
+  const SCRIPT_ID = typeof GM_SCRIPT_ID !== 'undefined' ? GM_SCRIPT_ID : "unknown";
+  
+  // Memory cache for synchronous access
+  const valueCache = typeof GM_PRESET_VALUES !== 'undefined' ? GM_PRESET_VALUES : {};
+  const resourceCache = typeof GM_PRESET_RESOURCES !== 'undefined' ? GM_PRESET_RESOURCES : {};
 
   // Prevent double injection
   if (window.GM_xmlhttpRequest) return;
@@ -9,8 +13,6 @@ export const GM_API_CODE = `
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ ...data, action, scriptId: SCRIPT_ID }, (response) => {
         if (chrome.runtime.lastError) {
-          // Ignore errors for fire-and-forget or if background is busy
-          // reject(chrome.runtime.lastError);
           resolve(null);
         } else if (response && response.error) {
           reject(response.error);
@@ -20,6 +22,17 @@ export const GM_API_CODE = `
       });
     });
   }
+
+  // GM_info
+  window.GM_info = {
+      script: {
+          id: SCRIPT_ID,
+          name: "Userscript", // Should ideally be passed in metadata
+          version: "0.1"
+      },
+      scriptHandler: "AnotherMonkey",
+      version: "0.1.0"
+  };
 
   // GM_xmlhttpRequest
   window.GM_xmlhttpRequest = function(details) {
@@ -67,20 +80,74 @@ export const GM_API_CODE = `
 
   // GM_setValue
   window.GM_setValue = function(key, value) {
+    valueCache[key] = value;
     return sendMessage("GM_setValue", { key, value });
   };
 
   // GM_getValue
   window.GM_getValue = function(key, defaultValue) {
-    console.warn("GM_getValue is async in this implementation. Use await GM.getValue(key).");
-    return sendMessage("GM_getValue", { key, defaultValue }).then(res => res && res.value !== undefined ? res.value : defaultValue);
+    return valueCache[key] !== undefined ? valueCache[key] : defaultValue;
+  };
+
+  // GM_deleteValue
+  window.GM_deleteValue = function(key) {
+    delete valueCache[key];
+    return sendMessage("GM_deleteValue", { key });
+  };
+
+  // GM_listValues
+  window.GM_listValues = function() {
+    return Object.keys(valueCache);
   };
   
-  // GM.getValue (Modern API)
+  // GM_getResourceText
+  window.GM_getResourceText = function(name) {
+    return resourceCache[name] ? resourceCache[name].content : null;
+  };
+
+  // GM_getResourceURL
+  window.GM_getResourceURL = function(name) {
+    if (!resourceCache[name]) return null;
+    // For now, return the original URL. 
+    // Real Tampermonkey might return a blob URL if it was cached as binary.
+    return resourceCache[name].url;
+  };
+
+  // GM_addStyle
+  window.GM_addStyle = function(css) {
+    const style = document.createElement('style');
+    style.textContent = css;
+    (document.head || document.documentElement).appendChild(style);
+    return style;
+  };
+
+  // GM_setClipboard
+  window.GM_setClipboard = function(data, info) {
+    const input = document.createElement('textarea');
+    input.value = data;
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    try {
+        document.execCommand('copy');
+    } catch (err) {
+        console.error('GM_setClipboard failed:', err);
+    }
+    document.body.removeChild(input);
+  };
+
+  // Modern API
   window.GM = window.GM || {};
-  window.GM.getValue = window.GM_getValue;
-  window.GM.setValue = window.GM_setValue;
+  window.GM.getValue = async (key, defaultValue) => window.GM_getValue(key, defaultValue);
+  window.GM.setValue = async (key, value) => window.GM_setValue(key, value);
+  window.GM.deleteValue = async (key) => window.GM_deleteValue(key);
+  window.GM.listValues = async () => window.GM_listValues();
   window.GM.xmlHttpRequest = window.GM_xmlhttpRequest;
+  window.GM.getResourceText = async (name) => window.GM_getResourceText(name);
+  window.GM.getResourceURL = async (name) => window.GM_getResourceURL(name);
+  window.GM.addStyle = (css) => window.GM_addStyle(css);
+  window.GM.info = window.GM_info;
 
   // GM_registerMenuCommand
   const menuCommandListeners = new Map();

@@ -68,13 +68,40 @@ const OptionsIndex = () => {
     if (!selectedId) return
     try {
         const metadata = parseMetadata(code)
+        
+        // Fetch new dependencies if any
+        const newDeps: Record<string, string> = { ...(selectedScript?.dependencyCache || {}) }
+        const toFetch: string[] = []
+        
+        metadata.requires.forEach(url => {
+            if (!newDeps[url]) toFetch.push(url)
+        })
+        metadata.resources.forEach(res => {
+            if (!newDeps[res.url]) toFetch.push(res.url)
+        })
+
+        if (toFetch.length > 0) {
+            // Should show some loading indicator ideally
+            await Promise.all(toFetch.map(async (url) => {
+                try {
+                    const res = await fetch(url)
+                    if (res.ok) {
+                        newDeps[url] = await res.text()
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch dependency:", url, e)
+                }
+            }))
+        }
+
         await db.scripts.update(selectedId, {
             code,
             metadata,
-            lastModified: Date.now()
+            lastModified: Date.now(),
+            dependencyCache: newDeps
         })
         // Update local state to clear dirty flag
-        setSelectedScript(prev => prev ? ({ ...prev, code, metadata }) : null)
+        setSelectedScript(prev => prev ? ({ ...prev, code, metadata, dependencyCache: newDeps }) : null)
         setIsDirty(false)
         triggerSync()
     } catch (e) {

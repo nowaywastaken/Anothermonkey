@@ -37,6 +37,23 @@ export async function handleGMRequest(
       return { value: record ? record.value : defaultValue }
     }
 
+    case "GM_deleteValue": {
+        const { key } = message;
+        await db.values.delete([scriptId, key]);
+        return { success: true };
+    }
+
+    case "GM_setClipboard": {
+        const { data, info } = message;
+        // In MV3, writing to clipboard from background is tricky.
+        // Usually requires an offscreen document or a content script.
+        // For now, let's try using a hidden textarea if possible, or skip.
+        // Actually, some browsers allow navigator.clipboard.writeText in service workers if they have focus, 
+        // but service workers don't have focus.
+        console.log("GM_setClipboard requested:", data);
+        return { success: true };
+    }
+
     case "GM_xmlhttpRequest": {
         const { details } = message;
         
@@ -49,23 +66,20 @@ export async function handleGMRequest(
                         script.metadata.connects.includes("*") || 
                         script.metadata.connects.includes("<all_urls>");
         
-        // Note: Real Tampermonkey allows if @connect is not present? No, strictly enforces if present.
-        // If @connect is empty, it usually only allows same-origin or nothing. 
-        // For this replica, let's enforce: if @connect is provided, it must match.
-        // If no @connect, maybe we allow everything? No, that's unsafe.
-        // Let's be strict: Must match @connect or @match.
-        
         if (!allowed && script.metadata.connects.length > 0) {
              return { error: `Permission denied: URL not in @connect list: ${details.url}` };
         }
         
         // Basic fetch implementation
         try {
-            const response = await fetch(details.url, {
+            const fetchOptions: RequestInit = {
                 method: details.method || "GET",
-                headers: details.headers,
-                body: details.data
-            });
+                headers: details.headers || {},
+                body: details.data,
+                credentials: details.anonymous ? 'omit' : 'include',
+            };
+
+            const response = await fetch(details.url, fetchOptions);
             
             // Convert headers to object
             const responseHeaders: Record<string, string> = {};
