@@ -45,31 +45,17 @@ export function parseMetadata(code: string): ScriptMetadata {
   const metadata = createDefaultMetadata();
   const lineRegex = /^\s*\/\/\s*@([\w:-]+)(?:\s+(.*))?$/;
 
-  // To handle single-value keys that might have language suffixes (e.g., @name:en)
-  const singleValueKeysSeen = new Set<string>();
-
   for (const line of lines) {
     const lineMatch = line.trim().match(lineRegex)
     if (!lineMatch) continue
 
-    let key = lineMatch[1].trim()
-    let value = lineMatch[2] ? lineMatch[2].trim() : "";
+    const key = lineMatch[1].trim()
+    const value = lineMatch[2] ? lineMatch[2].trim() : "";
 
-    // Handle localized keys like @name:en, @description:fr
-    const keyParts = key.split(':', 2);
-    const baseKey = keyParts[0];
+    // Get the base key for localized keys like @name:en, @description:fr
+    const baseKey = key.split(':', 1)[0];
 
-    // Prioritize the first encountered single-value key (e.g. @name)
-    // This simplifies handling of duplicates and localizations.
-    if (['name', 'namespace', 'version', 'description', 'author', 'run-at', 'updateURL', 'downloadURL'].includes(baseKey)) {
-        if (singleValueKeysSeen.has(baseKey)) {
-            continue; // Already processed a variant of this key
-        }
-        singleValueKeysSeen.add(baseKey);
-        key = baseKey; // Use the base key for assignment
-    }
-
-    switch (key) {
+    switch (baseKey) {
       case "name":
       case "namespace":
       case "version":
@@ -77,8 +63,7 @@ export function parseMetadata(code: string): ScriptMetadata {
       case "author":
       case "updateURL":
       case "downloadURL":
-        // This is now safe because we continue if seen
-        metadata[key] = value;
+        metadata[baseKey] = value;
         break;
 
       case "match":
@@ -104,7 +89,11 @@ export function parseMetadata(code: string): ScriptMetadata {
         const resMatch = value.match(/^(\S+)\s+(.+)$/)
         if (resMatch) {
             const resource = { name: resMatch[1], url: resMatch[2] };
-            if (!metadata.resources.some(r => r.name === resource.name)) {
+            // Prevent duplicates by name
+            const existingIndex = metadata.resources.findIndex(r => r.name === resource.name);
+            if (existingIndex !== -1) {
+                metadata.resources[existingIndex] = resource; // Last one wins
+            } else {
                 metadata.resources.push(resource);
             }
         }

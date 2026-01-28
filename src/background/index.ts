@@ -39,15 +39,8 @@ chrome.runtime.onConnect.addListener((port) => {
     if (port.name === "GM_xmlhttpRequest") {
         port.onMessage.addListener(async (message) => {
             if (message.action === "GM_xmlhttpRequest") {
-                try {
-                    // We call handleGMRequest but it needs to know it's a port-based call
-                    // to potentially send progress updates.
-                    // For now, we'll just handle it directly here or pass the port.
-                    const response = await handleGMRequest({ ...message, port }, port.sender as chrome.runtime.MessageSender);
-                    port.postMessage({ type: "load", response });
-                } catch (error: any) {
-                    port.postMessage({ type: "error", error: error.message });
-                }
+                // The handler will now be responsible for posting all messages to the port.
+                await handleGMRequest({ ...message, port }, port.sender as chrome.runtime.MessageSender);
             }
         });
     }

@@ -1,61 +1,4 @@
 export const GM_API_CODE = `
-const ANMON_matchPattern = (function() {
-  function patternToRegExp(pattern) {
-    if (pattern === '<all_urls>') {
-      return /^(https?|file|ftp):\\/\\/.*/;
-    }
-    const match = /^(https?|\\*|file|ftp):\\/\\/([^\\/]+)(\\/.*)$/.exec(pattern);
-    if (!match) {
-      throw new Error('Invalid match pattern: ' + pattern);
-    }
-    let [, scheme, host, path] = match;
-    let re = '^' + (scheme === '*' ? 'https?' : scheme) + ':\\\\/\\\\/';
-    if (host === '*') {
-      re += '[^/]+';
-    } else if (host.startsWith('*.')) {
-      re += '[^/]+\\\\.' + host.substring(2).replace(/\\./g, '\\\\.');
-    } else {
-      re += host.replace(/\\./g, '\\\\.');
-    }
-    re += path.replace(/[?.+^${}()|[\\\\\\]]/g, '\\\\$&').replace(/\\\\\\*/g, '.*');
-    re += '$';
-    return new RegExp(re);
-  }
-
-  function matchPattern(pattern, url) {
-    if (pattern === '*') return true;
-    if (pattern === '<all_urls>') {
-      return /^(https?|file|ftp):\\/\\/.*/.test(url);
-    }
-    if (pattern.startsWith('/') && pattern.endsWith('/')) {
-      try {
-        const regex = new RegExp(pattern.substring(1, pattern.length - 1));
-        return regex.test(url);
-      } catch (e) {
-        console.error('Invalid regex pattern:', pattern, e);
-        return false;
-      }
-    }
-    if (pattern.includes('://')) {
-      try {
-        const regex = patternToRegExp(pattern);
-        return regex.test(url);
-      } catch (e) {
-        // Fall through
-      }
-    }
-    try {
-      const reString = pattern.replace(/[?.+^${}()|[\\\\\\]]/g, '\\\\$&').replace(/\\*/g, '.*');
-      const regex = new RegExp('^' + reString + '$');
-      return regex.test(url);
-    } catch (e) {
-      console.error('Invalid glob pattern:', pattern, e);
-      return false;
-    }
-  }
-  return matchPattern;
-})();
-
 (function() {
   const SCRIPT_ID = typeof GM_SCRIPT_ID !== 'undefined' ? GM_SCRIPT_ID : "unknown";
   
@@ -81,8 +24,8 @@ const ANMON_matchPattern = (function() {
     });
   }
 
-  // Injected data from script-manager
   const SCRIPT_METADATA = typeof GM_SCRIPT_METADATA !== 'undefined' ? GM_SCRIPT_METADATA : {};
+  const EXTENSION_VERSION = typeof GM_EXTENSION_VERSION !== 'undefined' ? GM_EXTENSION_VERSION : "0.0.0";
 
   // GM_info
   window.GM_info = {
@@ -96,7 +39,7 @@ const ANMON_matchPattern = (function() {
           'run-at': SCRIPT_METADATA.runAt || 'document_idle',
       },
       scriptHandler: "AnotherMonkey",
-      version: "0.0.1" // The extension's version
+      version: EXTENSION_VERSION // The extension's version
   };
 
   // GM_xmlhttpRequest

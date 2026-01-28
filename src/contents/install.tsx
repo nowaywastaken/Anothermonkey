@@ -8,18 +8,25 @@ export const config: PlasmoCSConfig = {
 
 const InstallDetector = () => {
   useEffect(() => {
-    // Basic detection for .user.js files
-    if (window.location.pathname.endsWith(".user.js")) {
-        // Chrome displays text files in a <pre> usually
-        const content = document.body.innerText;
-        
-        // Simple check for metadata block
-        if (content.includes("// ==UserScript==") && content.includes("// ==/UserScript==")) {
-             chrome.runtime.sendMessage({ 
-                 action: "open_install_dialog", 
-                 code: content 
-             });
-        }
+    // This component detects if the current page is a raw .user.js file
+    // that the browser has rendered as plain text inside a <pre> tag.
+
+    if (
+      document.body.childElementCount === 1 &&
+      document.body.firstChild?.nodeName === "PRE"
+    ) {
+      const content = (document.body.firstChild as HTMLElement).innerText
+
+      // If it looks like a userscript, send it to the background to open the install tab.
+      if (
+        content.includes("// ==UserScript==") &&
+        content.includes("// ==/UserScript==")
+      ) {
+        chrome.runtime.sendMessage({
+          action: "open_install_dialog",
+          code: content
+        })
+      }
     }
   }, [])
 

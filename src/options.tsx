@@ -30,6 +30,7 @@ const OptionsIndex = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedScript, setSelectedScript] = useState<UserScript | null>(null)
   const [isDirty, setIsDirty] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
   // Load selected script content
   useEffect(() => {
@@ -46,7 +47,11 @@ const OptionsIndex = () => {
   }, [selectedId])
 
   const handleSelect = (id: string) => {
-    // If dirty, maybe confirm? For now just switch
+    if (isDirty) {
+      if (!window.confirm("You have unsaved changes. Are you sure you want to discard them and switch scripts?")) {
+        return; // User cancelled the switch
+      }
+    }
     setSelectedId(id)
   }
 
@@ -65,7 +70,9 @@ const OptionsIndex = () => {
   }
 
   const handleSave = async (code: string) => {
-    if (!selectedId) return
+    if (!selectedId || isSaving) return
+    
+    setIsSaving(true);
     try {
         const metadata = parseMetadata(code)
         
@@ -81,7 +88,6 @@ const OptionsIndex = () => {
         })
 
         if (toFetch.length > 0) {
-            // Should show some loading indicator ideally
             await Promise.all(toFetch.map(async (url) => {
                 try {
                     const res = await fetch(url)
@@ -106,6 +112,8 @@ const OptionsIndex = () => {
         triggerSync()
     } catch (e) {
         alert("Error parsing metadata: " + e)
+    } finally {
+        setIsSaving(false);
     }
   }
 
@@ -152,10 +160,7 @@ const OptionsIndex = () => {
             onSave={handleSave}
             onChange={handleEditorChange}
             isDirty={isDirty}
-            // A small hack to detect dirty state from inside the editor if we wanted 2-way binding more strictly
-            // But here we rely on the onSave callback to commit.
-            // Wait, I need to know if it's dirty to enable the save button.
-            // I'll update ScriptEditor to allow "onChange" propagation
+            isSaving={isSaving}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-zinc-600">

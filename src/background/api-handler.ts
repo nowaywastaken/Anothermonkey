@@ -59,15 +59,27 @@ export async function handleGMRequest(
         
         // Security Check
         const script = await getScript();
-        if (!script) return { error: "Script not found" };
+        if (!script) {
+            port.postMessage({ type: "error", error: { statusText: "Script not found" } });
+            return;
+        }
 
-        const allowed = script.metadata.connects.some(pattern => matchPattern(pattern, details.url)) ||
-                        script.metadata.matches.some(pattern => matchPattern(pattern, details.url)) ||
-                        script.metadata.connects.includes("*") || 
-                        script.metadata.connects.includes("<all_urls>");
+        // A URL is allowed if it matches the script's scope (@match, @include)
+        const isScopeAllowed = script.metadata.matches.some(p => matchPattern(p, details.url)) ||
+                               script.metadata.includes.some(p => matchPattern(p, details.url));
+
+        // A URL is allowed if it's explicitly in @connect (or if @connect is a wildcard)
+        const isConnectAllowed = script.metadata.connects.includes("*") ||
+                                 script.metadata.connects.includes("<all_urls>") ||
+                                 script.metadata.connects.some(p => matchPattern(p, details.url));
         
-        if (!allowed && script.metadata.connects.length > 0) {
-             return { error: `Permission denied: URL not in @connect list: ${details.url}` };
+        if (!isScopeAllowed && !isConnectAllowed) {
+             port.postMessage({ type: "error", error: {
+                statusText: "Forbidden",
+                status: 403,
+                error: `Permission denied for cross-origin request: The URL ${details.url} is not included in the script's @match, @include, or @connect directives.` 
+             }});
+             return;
         }
         
         try {
@@ -90,7 +102,17 @@ export async function handleGMRequest(
             const total = parseInt(response.headers.get('content-length') || '0');
             let loaded = 0;
 
-            if (response.body && port) {
+            const finalResponse = {
+                status: response.status,
+                statusText: response.statusText,
+                responseHeaders: responseHeadersStr,
+                finalUrl: response.url,
+                responseText: null as string | null,
+                responseBase64: null as string | null,
+                isBinary,
+            };
+
+            if (response.body) {
                 const reader = response.body.getReader();
                 const chunks = [];
                 
@@ -101,16 +123,14 @@ export async function handleGMRequest(
                     chunks.push(value);
                     loaded += value.length;
                     
-                    if (port) {
-                        port.postMessage({
-                            type: "progress",
-                            data: {
-                                lengthComputable: total > 0,
-                                loaded,
-                                total
-                            }
-                        });
-                    }
+                    port.postMessage({
+                        type: "progress",
+                        data: {
+                            lengthComputable: total > 0,
+                            loaded,
+                            total
+                        }
+                    });
                 }
                 
                 const fullBuffer = new Uint8Array(loaded);
@@ -120,55 +140,36 @@ export async function handleGMRequest(
                     offset += chunk.length;
                 }
 
-                let responseData;
                 if (isBinary) {
-                    // Convert to base64
                     let binary = '';
                     for (let i = 0; i < fullBuffer.length; i++) {
                         binary += String.fromCharCode(fullBuffer[i]);
                     }
-                    responseData = btoa(binary);
+                    finalResponse.responseBase64 = btoa(binary);
                 } else {
-                    responseData = new TextDecoder().decode(fullBuffer);
+                    finalResponse.responseText = new TextDecoder().decode(fullBuffer);
                 }
-
-                return {
-                    status: response.status,
-                    statusText: response.statusText,
-                    responseText: !isBinary ? responseData : null,
-                    responseBase64: isBinary ? responseData : null,
-                    isBinary,
-                    responseHeaders: responseHeadersStr,
-                    finalUrl: response.url
-                };
             } else {
-                // Fallback for simple calls without port/streaming
+                 // Should not happen for fetch, but as a fallback
                 const data = await (isBinary ? response.arrayBuffer() : response.text());
-                let responseData;
                 if (isBinary) {
-                    let binary = '';
+                     let binary = '';
                     const bytes = new Uint8Array(data as ArrayBuffer);
                     for (let i = 0; i < bytes.byteLength; i++) {
                         binary += String.fromCharCode(bytes[i]);
                     }
-                    responseData = btoa(binary);
+                    finalResponse.responseBase64 = btoa(binary);
                 } else {
-                    responseData = data;
+                    finalResponse.responseText = data as string;
                 }
-
-                return {
-                    status: response.status,
-                    statusText: response.statusText,
-                    responseText: !isBinary ? responseData : null,
-                    responseBase64: isBinary ? responseData : null,
-                    isBinary,
-                    responseHeaders: responseHeadersStr,
-                    finalUrl: response.url
-                };
             }
+
+            port.postMessage({ type: "load", response: finalResponse });
+
         } catch (e: any) {
-            return { error: e.message };
+            port.postMessage({ type: "error", error: { statusText: e.message, error: e.message } });
         }
+        return;
     }
 
     case "GM_notification": {
