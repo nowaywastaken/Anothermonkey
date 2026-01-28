@@ -28,10 +28,28 @@ export const GM_API_CODE = `
     sendMessage("GM_xmlhttpRequest", { details, requestId })
       .then(response => {
         if (response && details.onload) {
+            let responseData = response.responseText;
+            
+            if (response.isBinary && response.responseBase64) {
+                const binaryString = atob(response.responseBase64);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                if (details.responseType === 'blob') {
+                    responseData = new Blob([bytes]);
+                } else if (details.responseType === 'arraybuffer') {
+                    responseData = bytes.buffer;
+                }
+            }
+
             details.onload({
                 status: response.status,
                 statusText: response.statusText,
                 responseText: response.responseText,
+                response: responseData,
                 readyState: 4,
                 responseHeaders: response.responseHeaders,
                 finalUrl: response.finalUrl

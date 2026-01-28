@@ -4,10 +4,25 @@ import { handleGMRequest } from "./api-handler"
 console.log("AnotherMonkey Background Service Starting...")
 
 // Listen for messages from UI to trigger sync and GM API calls
+let pendingScriptCode: string | null = null;
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "sync_scripts") {
     syncScripts().then(() => sendResponse({ status: "success" }))
     return true // async response
+  }
+  
+  if (message.action === "open_install_dialog") {
+      pendingScriptCode = message.code;
+      chrome.tabs.create({ url: "tabs/install.html" });
+      sendResponse({ success: true });
+      return false;
+  }
+  
+  if (message.action === "get_pending_script") {
+      sendResponse({ code: pendingScriptCode });
+      // clear it? Maybe not yet, in case of refresh.
+      return false;
   }
   
   // Handle GM API calls

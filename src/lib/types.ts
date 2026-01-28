@@ -22,6 +22,9 @@ export interface UserScript {
   code: string;
   metadata: ScriptMetadata;
   lastModified: number;
+  dependencyCache?: {
+      [url: string]: string;
+  };
 }
 
 export interface UserScriptInjection {

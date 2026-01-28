@@ -67,19 +67,38 @@ export async function handleGMRequest(
                 body: details.data
             });
             
-            const text = await response.text();
-            
             // Convert headers to object
             const responseHeaders: Record<string, string> = {};
             response.headers.forEach((val, key) => {
                 responseHeaders[key] = val;
             });
             
+            const responseHeadersStr = Object.keys(responseHeaders).map(k => `${k}: ${responseHeaders[k]}`).join("\r\n");
+            
+            const isBinary = details.responseType === 'arraybuffer' || details.responseType === 'blob';
+            
+            let responseData;
+            if (isBinary) {
+                const buffer = await response.arrayBuffer();
+                // Convert to base64
+                let binary = '';
+                const bytes = new Uint8Array(buffer);
+                const len = bytes.byteLength;
+                for (let i = 0; i < len; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                responseData = btoa(binary);
+            } else {
+                responseData = await response.text();
+            }
+
             return {
                 status: response.status,
                 statusText: response.statusText,
-                responseText: text,
-                responseHeaders: Object.keys(responseHeaders).map(k => `${k}: ${responseHeaders[k]}`).join("\r\n"),
+                responseText: !isBinary ? responseData : null,
+                responseBase64: isBinary ? responseData : null,
+                isBinary,
+                responseHeaders: responseHeadersStr,
                 finalUrl: response.url
             };
         } catch (e: any) {
