@@ -1,5 +1,5 @@
 import { syncScripts, checkForUpdates } from "../lib/script-manager"
-import { handleGMRequest } from "./api-handler"
+import { handleGMRequest, xhrControllers } from "./api-handler"
 
 console.log("AnotherMonkey Background Service Starting...")
 
@@ -36,11 +36,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Listen for long-lived connections (for GM_xmlhttpRequest)
 chrome.runtime.onConnect.addListener((port) => {
+    let requestId: string | null = null;
     if (port.name === "GM_xmlhttpRequest") {
         port.onMessage.addListener(async (message) => {
             if (message.action === "GM_xmlhttpRequest") {
+                requestId = message.requestId;
                 // The handler will now be responsible for posting all messages to the port.
                 await handleGMRequest({ ...message, port }, port.sender as chrome.runtime.MessageSender);
+            } else if (message.action === "abort" && requestId) {
+                const controller = xhrControllers.get(requestId);
+                if (controller) {
+                    controller.abort();
+                    xhrControllers.delete(requestId);
+                }
+            }
+        });
+        port.onDisconnect.addListener(() => {
+            if (requestId) {
+                 const controller = xhrControllers.get(requestId);
+                if (controller) {
+                    controller.abort();
+                    xhrControllers.delete(requestId);
+                }
             }
         });
     }
@@ -50,6 +67,20 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === "check_updates") {
         checkForUpdates();
+    }
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (!tab?.id || !(typeof info.menuItemId === 'string') || !info.menuItemId.startsWith('anmon-cmd::')) return;
+    
+    const parts = (info.menuItemId as string).split("::");
+    const commandId = parts[2];
+
+    if (commandId) {
+        chrome.tabs.sendMessage(tab.id, {
+            action: "GM_menuCommandClicked",
+            id: commandId
+        }).catch(e => console.debug("Could not send menu click to tab, it might have been closed.", e));
     }
 });
 
