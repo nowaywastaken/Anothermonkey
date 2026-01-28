@@ -52,43 +52,53 @@ export function parseMetadata(code: string): ScriptMetadata {
         metadata.author = value
         break
       case "match":
-        metadata.matches.push(value)
+        if (value && !metadata.matches.includes(value)) {
+          metadata.matches.push(value)
+        }
         break
       case "exclude":
-        metadata.excludes.push(value)
+        if (value && !metadata.excludes.includes(value)) {
+          metadata.excludes.push(value)
+        }
         break
       case "include":
-        metadata.includes.push(value)
+        if (value && !metadata.includes.includes(value)) {
+          metadata.includes.push(value)
+        }
         break
       case "grant":
-        if (!metadata.grants.includes(value)) {
+        if (value && !metadata.grants.includes(value)) {
             metadata.grants.push(value)
         }
         break
       case "connect":
-        if (!metadata.connects.includes(value)) {
+        if (value && !metadata.connects.includes(value)) {
             metadata.connects.push(value)
         }
         break
       case "require":
-        metadata.requires.push(value)
+        if (value && !metadata.requires.includes(value)) {
+          metadata.requires.push(value)
+        }
         break
       case "resource":
         // Resource format: name url
         const resMatch = value.match(/^(\S+)\s+(.+)$/)
         if (resMatch) {
-            metadata.resources.push({
-                name: resMatch[1],
-                url: resMatch[2]
-            })
+            const resource = { name: resMatch[1], url: resMatch[2] };
+            if (!metadata.resources.some(r => r.name === resource.name)) {
+                metadata.resources.push(resource);
+            }
         }
         break
       case "run-at":
-        const runAtValue = value.replace(/-/g, "_")
-        if (runAtValue === "document_start" || runAtValue === "document_end" || runAtValue === "document_idle") {
-           metadata.runAt = runAtValue as any
+        if (value === "document-start" || value === "document-end" || value === "document-idle") {
+           metadata.runAt = value
         }
         break
+      case "noframes":
+        metadata.noframes = true;
+        break;
       case "updateURL":
         metadata.updateURL = value
         break

@@ -1,6 +1,7 @@
 import { db } from "./db"
 import { GM_API_CODE } from "./gm-api"
-import type { UserScriptInjection } from "./types"
+import { matchesUrl } from "./matcher"
+import type { UserScript, UserScriptInjection } from "./types"
 
 export async function syncScripts() {
   console.log("Syncing scripts to browser...")
@@ -62,42 +63,37 @@ export async function syncScripts() {
           }
       });
       
-      // 3. Add main script code with pre-check wrapper
+      // 3. Add main script code with pre-check wrapper if necessary
       let finalCode = script.code;
       
-      const hasRegexInclude = script.metadata.includes.some(i => i.startsWith("/") && i.endsWith("/"));
-      const hasAnyInclude = script.metadata.includes.length > 0;
-      const hasAnyExclude = script.metadata.excludes.length > 0;
+      // We need a pre-check if there are any @include or @exclude rules,
+      // or if there are regex-based @includes which forces a wide @match.
+      const needsPreCheck = script.metadata.includes.length > 0 || script.metadata.excludes.length > 0;
       
-      if (hasRegexInclude || (hasAnyInclude && script.metadata.matches.length === 0) || hasAnyExclude) {
-          const includeRegexes = script.metadata.includes.filter(i => i.startsWith("/") && i.endsWith("/"));
-          const includeGlobs = script.metadata.includes.filter(i => !i.startsWith("/") || !i.endsWith("/"));
-          const excludeRegexes = script.metadata.excludes.filter(e => e.startsWith("/") && e.endsWith("/"));
-          const excludeGlobs = script.metadata.excludes.filter(e => !e.startsWith("/") || !e.endsWith("/"));
-          
-          let wrapper = "(function() {\n";
-          wrapper += "  const currentUrl = window.location.href;\n";
-          wrapper += "  function matchGlob(pattern, url) {\n";
-          wrapper += "    if (pattern === '<all_urls>') return true;\n";
-          wrapper += "    const regex = new RegExp('^' + pattern.replace(/[.+?^${}()|[\\\\\\\\]|\\\\]/g, '\\\\$&').replace(/\\\\*/g, '.*') + '$');\n";
-          wrapper += "    return regex.test(url);\n";
-          wrapper += "  }\n";
-          
-          if (hasAnyInclude) {
-              wrapper += "  const incRegexes = [" + includeRegexes.join(", ") + "];\n";
-              wrapper += "  const incGlobs = " + JSON.stringify(includeGlobs) + ";\n";
-              wrapper += "  const matchedRegex = incRegexes.length > 0 && incRegexes.some(re => re.test(currentUrl));\n";
-              wrapper += "  const matchedGlob = incGlobs.length > 0 && incGlobs.some(g => matchGlob(g, currentUrl));\n";
-              wrapper += "  if (!matchedRegex && !matchedGlob && (incRegexes.length + incGlobs.length > 0)) return;\n";
-          }
-          
-          wrapper += "  const excRegexes = [" + excludeRegexes.join(", ") + "];\n";
-          wrapper += "  const excGlobs = " + JSON.stringify(excludeGlobs) + ";\n";
-          wrapper += "  if (excRegexes.some(re => re.test(currentUrl))) return;\n";
-          wrapper += "  if (excGlobs.some(g => matchGlob(g, currentUrl))) return;\n";
-          
+      if (needsPreCheck) {
+          const allIncludes = JSON.stringify(script.metadata.includes);
+          const allExcludes = JSON.stringify(script.metadata.excludes);
+
+          const wrapper = `
+(function() {
+  // This wrapper performs runtime checks for @include and @exclude rules.
+  const currentUrl = window.location.href;
+  const includes = ${allIncludes};
+  const excludes = ${allExcludes};
+
+  // The ANMON_matchPattern function is globally available from the injected GM_API code.
+  const isIncluded = includes.length === 0 || includes.some(p => ANMON_matchPattern(p, currentUrl));
+  const isExcluded = excludes.some(p => ANMON_matchPattern(p, currentUrl));
+
+  if (isExcluded || !isIncluded) {
+    return;
+  }
+
+  // If we've passed all checks, execute the original script code.
+`;
           finalCode = wrapper + script.code + "\n})();";
       }
+
 
       jsToInject.push({ code: finalCode });
 
@@ -206,15 +202,22 @@ function isNewerVersion(newVer: string, oldVer: string): boolean {
     return false;
 }
 
-async function injectIntoExistingTabs(script: any) {
-    const tabs = await chrome.tabs.query({ url: script.metadata.matches });
+async function injectIntoExistingTabs(script: UserScript) {
+    const allTabs = await chrome.tabs.query({});
     
-    for (const tab of tabs) {
+    const patternsToMatch = [...script.metadata.matches, ...script.metadata.includes];
+    const patternsToExclude = script.metadata.excludes;
+
+    for (const tab of allTabs) {
         if (!tab.id || !tab.url) continue;
+        
+        const shouldRun = (patternsToMatch.length === 0 || matchesUrl(patternsToMatch, tab.url)) && !matchesUrl(patternsToExclude, tab.url);
+
+        if (!shouldRun) continue;
         
         // Basic check if already injected? 
         // Tampermonkey usually has a way to avoid double injection.
-        // For now, let's just try to inject.
+        // For now, we just try to inject.
         try {
             // We need to inject the API code + requires + script code
             const idInjection = `const GM_SCRIPT_ID = "${script.id}";\n`;
@@ -244,9 +247,10 @@ async function injectIntoExistingTabs(script: any) {
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 func: (code) => {
-                    // Check for double injection
-                    if ((window as any).GM_API_INJECTED) return;
-                    (window as any).GM_API_INJECTED = true;
+                    // A simple flag to avoid double injection in the same tab session
+                    const injectionMarker = `ANMON_INJECTED_${script.id}`;
+                    if ((window as any)[injectionMarker]) return;
+                    (window as any)[injectionMarker] = true;
 
                     const scriptEl = document.createElement('script');
                     scriptEl.textContent = code;
@@ -261,7 +265,10 @@ async function injectIntoExistingTabs(script: any) {
                              // The report suggests that executeScript fallback runs in ISOLATED world.
             });
         } catch (e) {
-            console.error(`Failed to inject into tab ${tab.id}:`, e);
+            // Ignore errors from injecting into privileged pages like chrome://
+            if (!e.message.includes("Cannot access") && !e.message.includes("Missing host permission")) {
+                 console.error(`Failed to inject into tab ${tab.id}:`, e);
+            }
         }
     }
 }

@@ -10,6 +10,7 @@ export interface ScriptMetadata {
   grants: string[];
   connects: string[];
   runAt: 'document_start' | 'document_end' | 'document_idle';
+  noframes?: boolean;
   requires: string[];
   resources: { name: string; url: string; content?: string }[];
   updateURL?: string;
