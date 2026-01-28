@@ -37,14 +37,16 @@ export const GM_API_CODE = `
   // GM_xmlhttpRequest
   window.GM_xmlhttpRequest = function(details) {
     const requestId = Math.random().toString(36).substring(2);
+    const port = chrome.runtime.connect({ name: "GM_xmlhttpRequest" });
     
-    sendMessage("GM_xmlhttpRequest", { details, requestId })
-      .then(response => {
-        if (response && details.onload) {
-            let responseData = response.responseText;
+    port.onMessage.addListener((message) => {
+        if (message.type === "progress" && details.onprogress) {
+            details.onprogress(message.data);
+        } else if (message.type === "load") {
+            let responseData = message.response.responseText;
             
-            if (response.isBinary && response.responseBase64) {
-                const binaryString = atob(response.responseBase64);
+            if (message.response.isBinary && message.response.responseBase64) {
+                const binaryString = atob(message.response.responseBase64);
                 const len = binaryString.length;
                 const bytes = new Uint8Array(len);
                 for (let i = 0; i < len; i++) {
@@ -58,83 +60,61 @@ export const GM_API_CODE = `
                 }
             }
 
-            details.onload({
-                status: response.status,
-                statusText: response.statusText,
-                responseText: response.responseText,
-                response: responseData,
-                readyState: 4,
-                responseHeaders: response.responseHeaders,
-                finalUrl: response.finalUrl
-            });
+            if (details.onload) {
+                details.onload({
+                    ...message.response,
+                    response: responseData,
+                    readyState: 4
+                });
+            }
+            port.disconnect();
+        } else if (message.type === "error") {
+            if (details.onerror) details.onerror(message.error);
+            port.disconnect();
         }
-      })
-      .catch(err => {
-        if (details.onerror) details.onerror(err);
-      });
+    });
+
+    port.postMessage({ 
+        action: "GM_xmlhttpRequest", 
+        scriptId: SCRIPT_ID, 
+        details: {
+            method: details.method,
+            url: details.url,
+            headers: details.headers,
+            data: details.data,
+            binary: details.binary,
+            timeout: details.timeout,
+            context: details.context,
+            responseType: details.responseType,
+            anonymous: details.anonymous
+        }, 
+        requestId 
+    });
       
     return {
-        abort: () => sendMessage("GM_xhrAbort", { requestId })
+        abort: () => {
+            port.postMessage({ action: "abort" });
+            port.disconnect();
+        }
     };
   };
 
-  // GM_setValue
-  window.GM_setValue = function(key, value) {
-    valueCache[key] = value;
-    return sendMessage("GM_setValue", { key, value });
+  // GM_log
+  window.GM_log = function(message) {
+    console.log("[%cGM_log%c] " + message, "color: #10b981; font-weight: bold", "");
   };
 
-  // GM_getValue
-  window.GM_getValue = function(key, defaultValue) {
-    return valueCache[key] !== undefined ? valueCache[key] : defaultValue;
-  };
-
-  // GM_deleteValue
-  window.GM_deleteValue = function(key) {
-    delete valueCache[key];
-    return sendMessage("GM_deleteValue", { key });
-  };
-
-  // GM_listValues
-  window.GM_listValues = function() {
-    return Object.keys(valueCache);
-  };
-  
-  // GM_getResourceText
-  window.GM_getResourceText = function(name) {
-    return resourceCache[name] ? resourceCache[name].content : null;
-  };
-
-  // GM_getResourceURL
-  window.GM_getResourceURL = function(name) {
-    if (!resourceCache[name]) return null;
-    // For now, return the original URL. 
-    // Real Tampermonkey might return a blob URL if it was cached as binary.
-    return resourceCache[name].url;
-  };
-
-  // GM_addStyle
-  window.GM_addStyle = function(css) {
-    const style = document.createElement('style');
-    style.textContent = css;
-    (document.head || document.documentElement).appendChild(style);
-    return style;
-  };
-
-  // GM_setClipboard
-  window.GM_setClipboard = function(data, info) {
-    const input = document.createElement('textarea');
-    input.value = data;
-    input.style.position = 'fixed';
-    input.style.opacity = '0';
-    document.body.appendChild(input);
-    input.select();
-    try {
-        document.execCommand('copy');
-    } catch (err) {
-        console.error('GM_setClipboard failed:', err);
+  // GM_notification
+  window.GM_notification = function(details, ondone) {
+    if (typeof details === 'string') {
+        details = { text: details };
     }
-    document.body.removeChild(input);
+    sendMessage("GM_notification", { details }).then(ondone);
+  };
+
+  // GM_openInTab
+  window.GM_openInTab = function(url, options) {
+    sendMessage("GM_openInTab", { url, options });
   };
 
   // Modern API
@@ -147,6 +127,9 @@ export const GM_API_CODE = `
   window.GM.getResourceText = async (name) => window.GM_getResourceText(name);
   window.GM.getResourceURL = async (name) => window.GM_getResourceURL(name);
   window.GM.addStyle = (css) => window.GM_addStyle(css);
+  window.GM.log = (message) => window.GM_log(message);
+  window.GM.notification = (details, ondone) => window.GM_notification(details, ondone);
+  window.GM.openInTab = (url, options) => window.GM_openInTab(url, options);
   window.GM.info = window.GM_info;
 
   // GM_registerMenuCommand

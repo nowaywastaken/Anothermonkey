@@ -60,34 +60,37 @@ export async function syncScripts() {
       let finalCode = script.code;
       
       const hasRegexInclude = script.metadata.includes.some(i => i.startsWith("/") && i.endsWith("/"));
-      const hasExclude = script.metadata.excludes.length > 0;
+      const hasAnyInclude = script.metadata.includes.length > 0;
+      const hasAnyExclude = script.metadata.excludes.length > 0;
       
-      if (hasRegexInclude || hasExclude) {
+      if (hasRegexInclude || (hasAnyInclude && script.metadata.matches.length === 0) || hasAnyExclude) {
           const includeRegexes = script.metadata.includes.filter(i => i.startsWith("/") && i.endsWith("/"));
+          const includeGlobs = script.metadata.includes.filter(i => !i.startsWith("/") || !i.endsWith("/"));
           const excludeRegexes = script.metadata.excludes.filter(e => e.startsWith("/") && e.endsWith("/"));
           const excludeGlobs = script.metadata.excludes.filter(e => !e.startsWith("/") || !e.endsWith("/"));
           
-          finalCode = `(function() {
-            const currentUrl = window.location.href;
-            
-            // Regex include check
-            const includeRegexes = [${includeRegexes.join(", ")}];
-            if (includeRegexes.length > 0 && !includeRegexes.some(re => re.test(currentUrl))) {
-                return;
-            }
-            
-            // Exclude check
-            const excludeRegexes = [${excludeRegexes.join(", ")}];
-            if (excludeRegexes.some(re => re.test(currentUrl))) {
-                return;
-            }
-            
-            // For glob excludes, we'd need the matcher lib available here, 
-            // but for now we focus on regexes as requested by the report.
-
-            // Execute actual script
-            ${script.code}
-          })();`;
+          let wrapper = "(function() {\n";
+          wrapper += "  const currentUrl = window.location.href;\n";
+          wrapper += "  function matchGlob(pattern, url) {\n";
+          wrapper += "    if (pattern === '<all_urls>') return true;\n";
+          wrapper += "    const regex = new RegExp('^' + pattern.replace(/[.+?^${}()|[\\\\\\\\]|\\\\]/g, '\\\\$&').replace(/\\\\*/g, '.*') + '$');\n";
+          wrapper += "    return regex.test(url);\n";
+          wrapper += "  }\n";
+          
+          if (hasAnyInclude) {
+              wrapper += "  const incRegexes = [" + includeRegexes.join(", ") + "];\n";
+              wrapper += "  const incGlobs = " + JSON.stringify(includeGlobs) + ";\n";
+              wrapper += "  const matchedRegex = incRegexes.length > 0 && incRegexes.some(re => re.test(currentUrl));\n";
+              wrapper += "  const matchedGlob = incGlobs.length > 0 && incGlobs.some(g => matchGlob(g, currentUrl));\n";
+              wrapper += "  if (!matchedRegex && !matchedGlob && (incRegexes.length + incGlobs.length > 0)) return;\n";
+          }
+          
+          wrapper += "  const excRegexes = [" + excludeRegexes.join(", ") + "];\n";
+          wrapper += "  const excGlobs = " + JSON.stringify(excludeGlobs) + ";\n";
+          wrapper += "  if (excRegexes.some(re => re.test(currentUrl))) return;\n";
+          wrapper += "  if (excGlobs.some(g => matchGlob(g, currentUrl))) return;\n";
+          
+          finalCode = wrapper + script.code + "\n})();";
       }
 
       jsToInject.push({ code: finalCode });
@@ -129,6 +132,72 @@ export async function syncScripts() {
   } catch (error) {
     console.error("Failed to sync scripts:", error)
   }
+}
+
+export async function checkForUpdates() {
+    console.log("Checking for script updates...");
+    const scripts = await db.scripts.toArray();
+    
+    for (const script of scripts) {
+        const updateUrl = script.metadata.updateURL || script.metadata.downloadURL;
+        if (!updateUrl) continue;
+        
+        try {
+            const response = await fetch(updateUrl);
+            if (!response.ok) continue;
+            
+            const code = await response.text();
+            const { parseMetadata } = await import("./parser");
+            const newMetadata = parseMetadata(code);
+            
+            if (isNewerVersion(newMetadata.version, script.metadata.version)) {
+                console.log(`Updating script: ${script.metadata.name} (${script.metadata.version} -> ${newMetadata.version})`);
+                
+                // Fetch new dependencies if any
+                const dependencies: Record<string, string> = {};
+                const toFetch = [
+                    ...newMetadata.requires.map(url => ({ url, type: 'require' })),
+                    ...newMetadata.resources.map(res => ({ url: res.url, type: 'resource' }))
+                ];
+
+                await Promise.all(toFetch.map(async (item) => {
+                    try {
+                        const res = await fetch(item.url);
+                        if (res.ok) dependencies[item.url] = await res.text();
+                    } catch (e) {
+                        console.error(`Failed to fetch dependency ${item.url}:`, e);
+                    }
+                }));
+
+                await db.scripts.update(script.id, {
+                    code,
+                    metadata: newMetadata,
+                    lastModified: Date.now(),
+                    dependencyCache: {
+                        ...script.dependencyCache,
+                        ...dependencies
+                    }
+                });
+            }
+        } catch (error) {
+            console.error(`Failed to update script ${script.metadata.name}:`, error);
+        }
+    }
+    
+    await syncScripts();
+}
+
+function isNewerVersion(newVer: string, oldVer: string): boolean {
+    const n = newVer.split('.').map(Number);
+    const o = oldVer.split('.').map(Number);
+    
+    for (let i = 0; i < Math.max(n.length, o.length); i++) {
+        const nv = n[i] || 0;
+        const ov = o[i] || 0;
+        if (nv > ov) return true;
+        if (nv < ov) return false;
+    }
+    return false;
 }
 
 async function injectIntoExistingTabs(script: any) {

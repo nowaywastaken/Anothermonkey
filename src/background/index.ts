@@ -1,4 +1,4 @@
-import { syncScripts } from "../lib/script-manager"
+import { syncScripts, checkForUpdates } from "../lib/script-manager"
 import { handleGMRequest } from "./api-handler"
 
 console.log("AnotherMonkey Background Service Starting...")
@@ -34,8 +34,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 })
 
+// Listen for long-lived connections (for GM_xmlhttpRequest)
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === "GM_xmlhttpRequest") {
+        port.onMessage.addListener(async (message) => {
+            if (message.action === "GM_xmlhttpRequest") {
+                try {
+                    // We call handleGMRequest but it needs to know it's a port-based call
+                    // to potentially send progress updates.
+                    // For now, we'll just handle it directly here or pass the port.
+                    const response = await handleGMRequest({ ...message, port }, port.sender);
+                    port.postMessage({ type: "load", response });
+                } catch (error: any) {
+                    port.postMessage({ type: "error", error: error.message });
+                }
+            }
+        });
+    }
+});
+
+// Listen for alarms (for periodic update checks)
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === "check_updates") {
+        checkForUpdates();
+    }
+});
+
+// Set up periodic update check (e.g., every 24 hours)
+chrome.alarms.create("check_updates", { periodInMinutes: 24 * 60 });
+
 // Initial sync
 syncScripts()
+checkForUpdates() // Also check on startup
 
 // Configure the User Script world
 // @ts-ignore

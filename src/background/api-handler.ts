@@ -55,7 +55,7 @@ export async function handleGMRequest(
     }
 
     case "GM_xmlhttpRequest": {
-        const { details } = message;
+        const { details, port } = message;
         
         // Security Check
         const script = await getScript();
@@ -70,7 +70,6 @@ export async function handleGMRequest(
              return { error: `Permission denied: URL not in @connect list: ${details.url}` };
         }
         
-        // Basic fetch implementation
         try {
             const fetchOptions: RequestInit = {
                 method: details.method || "GET",
@@ -81,43 +80,117 @@ export async function handleGMRequest(
 
             const response = await fetch(details.url, fetchOptions);
             
-            // Convert headers to object
             const responseHeaders: Record<string, string> = {};
             response.headers.forEach((val, key) => {
                 responseHeaders[key] = val;
             });
-            
             const responseHeadersStr = Object.keys(responseHeaders).map(k => `${k}: ${responseHeaders[k]}`).join("\r\n");
             
             const isBinary = details.responseType === 'arraybuffer' || details.responseType === 'blob';
-            
-            let responseData;
-            if (isBinary) {
-                const buffer = await response.arrayBuffer();
-                // Convert to base64
-                let binary = '';
-                const bytes = new Uint8Array(buffer);
-                const len = bytes.byteLength;
-                for (let i = 0; i < len; i++) {
-                    binary += String.fromCharCode(bytes[i]);
-                }
-                responseData = btoa(binary);
-            } else {
-                responseData = await response.text();
-            }
+            const total = parseInt(response.headers.get('content-length') || '0');
+            let loaded = 0;
 
-            return {
-                status: response.status,
-                statusText: response.statusText,
-                responseText: !isBinary ? responseData : null,
-                responseBase64: isBinary ? responseData : null,
-                isBinary,
-                responseHeaders: responseHeadersStr,
-                finalUrl: response.url
-            };
+            if (response.body && port) {
+                const reader = response.body.getReader();
+                const chunks = [];
+                
+                while(true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    chunks.push(value);
+                    loaded += value.length;
+                    
+                    if (port) {
+                        port.postMessage({
+                            type: "progress",
+                            data: {
+                                lengthComputable: total > 0,
+                                loaded,
+                                total
+                            }
+                        });
+                    }
+                }
+                
+                const fullBuffer = new Uint8Array(loaded);
+                let offset = 0;
+                for (const chunk of chunks) {
+                    fullBuffer.set(chunk, offset);
+                    offset += chunk.length;
+                }
+
+                let responseData;
+                if (isBinary) {
+                    // Convert to base64
+                    let binary = '';
+                    for (let i = 0; i < fullBuffer.length; i++) {
+                        binary += String.fromCharCode(fullBuffer[i]);
+                    }
+                    responseData = btoa(binary);
+                } else {
+                    responseData = new TextDecoder().decode(fullBuffer);
+                }
+
+                return {
+                    status: response.status,
+                    statusText: response.statusText,
+                    responseText: !isBinary ? responseData : null,
+                    responseBase64: isBinary ? responseData : null,
+                    isBinary,
+                    responseHeaders: responseHeadersStr,
+                    finalUrl: response.url
+                };
+            } else {
+                // Fallback for simple calls without port/streaming
+                const data = await (isBinary ? response.arrayBuffer() : response.text());
+                let responseData;
+                if (isBinary) {
+                    let binary = '';
+                    const bytes = new Uint8Array(data as ArrayBuffer);
+                    for (let i = 0; i < bytes.byteLength; i++) {
+                        binary += String.fromCharCode(bytes[i]);
+                    }
+                    responseData = btoa(binary);
+                } else {
+                    responseData = data;
+                }
+
+                return {
+                    status: response.status,
+                    statusText: response.statusText,
+                    responseText: !isBinary ? responseData : null,
+                    responseBase64: isBinary ? responseData : null,
+                    isBinary,
+                    responseHeaders: responseHeadersStr,
+                    finalUrl: response.url
+                };
+            }
         } catch (e: any) {
             return { error: e.message };
         }
+    }
+
+    case "GM_notification": {
+        const { details } = message;
+        chrome.notifications.create({
+            type: "basic",
+            iconUrl: details.image || "assets/icon.png",
+            title: details.title || "AnotherMonkey",
+            message: details.text,
+            silent: details.silent
+        });
+        return { success: true };
+    }
+
+    case "GM_openInTab": {
+        const { url, options } = message;
+        chrome.tabs.create({
+            url: url,
+            active: options?.active !== false,
+            insert: options?.insert
+        });
+        return { success: true };
     }
     
     case "GM_registerMenuCommand": {
