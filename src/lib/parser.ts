@@ -1,23 +1,22 @@
-import type { ScriptMetadata } from "./types"
+import type { ScriptMetadata } from "./types";
 
 // Helper to create a default metadata object.
 // These are the absolute minimum defaults.
 function createDefaultMetadata(): ScriptMetadata {
-    return {
-        name: "",
-        version: "0.0.0",
-        matches: [],
-        excludes: [],
-        includes: [],
-        grants: [],
-        connects: [],
-        requires: [],
-        resources: [],
-        runAt: "document_idle",
-        noframes: false,
-    };
+  return {
+    name: "",
+    version: "0.0.0",
+    matches: [],
+    excludes: [],
+    includes: [],
+    grants: [],
+    connects: [],
+    requires: [],
+    resources: [],
+    runAt: "document_idle",
+    noframes: false,
+  };
 }
-
 
 /**
  * Parses the metadata block of a userscript.
@@ -27,21 +26,24 @@ function createDefaultMetadata(): ScriptMetadata {
  */
 export function parseMetadata(code: string): ScriptMetadata {
   // 1. Handle BOM (Byte Order Mark) by removing it if present.
-  if (code.charCodeAt(0) === 0xFEFF) {
+  if (code.charCodeAt(0) === 0xfeff) {
     code = code.slice(1);
   }
 
   // 2. Extract the metadata block content.
-  const metadataBlockRegex = /\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/
-  const match = code.match(metadataBlockRegex)
+  const metadataBlockRegex =
+    /\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/;
+  const match = code.match(metadataBlockRegex);
 
   if (!match) {
-    throw new Error("No valid metadata block found. The script must contain a header with // ==UserScript== and // ==/UserScript==.")
+    throw new Error(
+      "No valid metadata block found. The script must contain a header with // ==UserScript== and // ==/UserScript==.",
+    );
   }
 
-  const metadataBlock = match[1]
-  const lines = metadataBlock.split("\n")
-  
+  const metadataBlock = match[1];
+  const lines = metadataBlock.split("\n");
+
   const metadata = createDefaultMetadata();
   const lineRegex = /^\s*\/\/\s*@([\w:-]+)(?:\s+(.*))?$/;
 
@@ -49,23 +51,23 @@ export function parseMetadata(code: string): ScriptMetadata {
   const localized: { [key: string]: { [locale: string]: string } } = {
     name: {},
     description: {},
-    author: {}
+    author: {},
   };
 
   for (const line of lines) {
-    const lineMatch = line.trim().match(lineRegex)
-    if (!lineMatch) continue
+    const lineMatch = line.trim().match(lineRegex);
+    if (!lineMatch) continue;
 
-    const key = lineMatch[1].trim()
+    const key = lineMatch[1].trim();
     const value = lineMatch[2] ? lineMatch[2].trim() : "";
 
-    const [baseKey, locale] = key.split(':', 2);
+    const [baseKey, locale] = key.split(":", 2);
 
     switch (baseKey) {
       case "name":
       case "description":
       case "author":
-        localized[baseKey][locale || 'default'] = value;
+        localized[baseKey][locale || "default"] = value;
         break;
 
       case "namespace":
@@ -95,29 +97,40 @@ export function parseMetadata(code: string): ScriptMetadata {
         break;
 
       case "resource":
-        const resMatch = value.match(/^(\S+)\s+(.+)$/)
+        const resMatch = value.match(/^(\S+)\s+(.+)$/);
         if (resMatch) {
-            const resource = { name: resMatch[1], url: resMatch[2] };
-            // Prevent duplicates by name
-            const existingIndex = metadata.resources.findIndex(r => r.name === resource.name);
-            if (existingIndex !== -1) {
-                metadata.resources[existingIndex] = resource; // Last one wins
-            } else {
-                metadata.resources.push(resource);
-            }
+          const resource = { name: resMatch[1], url: resMatch[2] };
+          // Prevent duplicates by name
+          const existingIndex = metadata.resources.findIndex(
+            (r) => r.name === resource.name,
+          );
+          if (existingIndex !== -1) {
+            metadata.resources[existingIndex] = resource; // Last one wins
+          } else {
+            metadata.resources.push(resource);
+          }
         }
         break;
-        
+
       case "run-at":
-        if (value === "document-start" || value === "document-end" || value === "document-idle") {
-           metadata.runAt = value
+        if (
+          value === "document-start" ||
+          value === "document-end" ||
+          value === "document-idle"
+        ) {
+          metadata.runAt =
+            value === "document-start"
+              ? "document_start"
+              : value === "document-end"
+                ? "document_end"
+                : "document_idle";
         }
         break;
 
       case "noframes":
         metadata.noframes = true;
         break;
-      
+
       // Ignore unknown keys
       default:
         break;
@@ -125,34 +138,37 @@ export function parseMetadata(code: string): ScriptMetadata {
   }
 
   // Helper to select the best localized string
-  function selectLocalized(values: { [locale: string]: string }, fallback?: string): string {
-    if (typeof navigator === 'undefined') return values['default'] || fallback || '';
+  function selectLocalized(
+    values: { [locale: string]: string },
+    fallback?: string,
+  ): string {
+    if (typeof navigator === "undefined")
+      return values["default"] || fallback || "";
 
     const lang = navigator.language; // e.g., "en-US"
     if (values[lang]) {
-        return values[lang];
+      return values[lang];
     }
-    const langPart = lang.split('-')[0]; // e.g., "en"
+    const langPart = lang.split("-")[0]; // e.g., "en"
     if (values[langPart]) {
-        return values[langPart];
+      return values[langPart];
     }
-    return values['default'] || fallback || '';
+    return values["default"] || fallback || "";
   }
 
   metadata.name = selectLocalized(localized.name);
   metadata.description = selectLocalized(localized.description);
   metadata.author = selectLocalized(localized.author);
 
-
   // A script is not valid without a name.
   if (!metadata.name) {
-      throw new Error("The script is missing a required @name metadata field.");
-  }
-  
-  // According to the spec, if @grant none is present with others, it's ignored.
-  if (metadata.grants.includes("none") && metadata.grants.length > 1) {
-    metadata.grants = metadata.grants.filter(g => g !== "none");
+    throw new Error("The script is missing a required @name metadata field.");
   }
 
-  return metadata
+  // According to the spec, if @grant none is present with others, it's ignored.
+  if (metadata.grants.includes("none") && metadata.grants.length > 1) {
+    metadata.grants = metadata.grants.filter((g) => g !== "none");
+  }
+
+  return metadata;
 }
