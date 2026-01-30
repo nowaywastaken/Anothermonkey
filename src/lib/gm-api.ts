@@ -153,17 +153,166 @@ export const GM_API_CODE = `
     console.log("[%cGM_log%c] " + message, "color: #10b981; font-weight: bold", "");
   };
 
-  // Notifications
+  // Notifications with full support for callbacks and buttons
   window.GM_notification = function(details, ondone) {
+    const notificationId = Math.random().toString(36).substring(2);
+    
     if (typeof details === 'string') {
         details = { text: details };
     }
-    sendMessage("GM_notification", { details }).then(ondone);
+    
+    // Store callbacks for this notification
+    if (details.onclick || details.ondone || (details.buttons && details.buttons.length > 0)) {
+        window._gmNotificationCallbacks = window._gmNotificationCallbacks || {};
+        window._gmNotificationCallbacks[notificationId] = {
+            onclick: details.onclick,
+            ondone: details.ondone,
+            buttons: details.buttons,
+            timeout: details.timeout
+        };
+    }
+    
+    sendMessage("GM_notification", { 
+        details: {
+            text: details.text,
+            title: details.title,
+            imageUrl: details.imageUrl,
+            onclick: !!details.onclick,
+            ondone: !!details.ondone,
+            buttons: details.buttons ? details.buttons.map(b => ({ title: b.title })) : undefined,
+            timeout: details.timeout,
+            notificationId: notificationId
+        } 
+    }).then((response) => {
+        if (response && response.error) {
+            console.error("GM_notification error:", response.error);
+        }
+        if (ondone) ondone(response?.error);
+    });
+    
+    return notificationId;
   };
+
+  // Listen for notification events from background
+  chrome.runtime.onMessage.addListener((message) => {
+      if (message.action === "GM_notificationClick" && message.notificationId) {
+          const callbacks = window._gmNotificationCallbacks?.[message.notificationId];
+          if (callbacks?.onclick) {
+              try {
+                  callbacks.onclick();
+              } catch (e) {
+                  console.error("Error in notification onclick handler:", e);
+              }
+          }
+      }
+      if (message.action === "GM_notificationButton" && message.notificationId && message.buttonIndex !== undefined) {
+          const callbacks = window._gmNotificationCallbacks?.[message.notificationId];
+          if (callbacks?.buttons?.[message.buttonIndex]?.onClick) {
+              try {
+                  callbacks.buttons[message.buttonIndex].onClick();
+              } catch (e) {
+                  console.error("Error in notification button handler:", e);
+              }
+          }
+      }
+      if (message.action === "GM_notificationClosed" && message.notificationId) {
+          const callbacks = window._gmNotificationCallbacks?.[message.notificationId];
+          if (callbacks?.ondone) {
+              try {
+                  callbacks.ondone();
+              } catch (e) {
+                  console.error("Error in notification ondone handler:", e);
+              }
+          }
+          // Clean up callbacks
+          if (window._gmNotificationCallbacks) {
+              delete window._gmNotificationCallbacks[message.notificationId];
+          }
+      }
+  });
 
   // Tabs
   window.GM_openInTab = function(url, options) {
     sendMessage("GM_openInTab", { url, options });
+  };
+
+  // GM_download
+  window.GM_download = function(details) {
+    const downloadId = Math.random().toString(36).substring(2);
+    const port = chrome.runtime.connect({ name: "GM_download_" + downloadId });
+    
+    port.onMessage.addListener((message) => {
+        if (message.type === "progress" && details.onprogress) {
+            details.onprogress(message.data);
+        } else if (message.type === "load") {
+            if (details.onload) {
+                details.onload(message.result);
+            }
+            port.disconnect();
+        } else if (message.type === "error") {
+            if (details.onerror) details.onerror(message.error);
+            port.disconnect();
+        }
+    });
+
+    port.postMessage({ 
+        action: "GM_download", 
+        scriptId: SCRIPT_ID, 
+        details: {
+            url: details.url,
+            name: details.name,
+            headers: details.headers,
+            saveAs: details.saveAs
+        },
+        downloadId 
+    });
+      
+    return {
+        abort: () => {
+            port.postMessage({ action: "abort", downloadId });
+            port.disconnect();
+        }
+    };
+  };
+
+  // GM_cookie
+  window.GM_cookie = function(action, details, callback) {
+    const cookieId = Math.random().toString(36).substring(2);
+    const port = chrome.runtime.connect({ name: "GM_cookie_" + cookieId });
+    
+    port.onMessage.addListener((message) => {
+        if (message.type === "success") {
+            if (callback) callback(null, message.result);
+            port.disconnect();
+        } else if (message.type === "error") {
+            if (callback) callback(message.error, null);
+            port.disconnect();
+        }
+    });
+
+    port.postMessage({
+        action: "GM_cookie",
+        scriptId: SCRIPT_ID,
+        cookieAction: action,
+        details: {
+            url: details.url,
+            name: details.name,
+            value: details.value,
+            domain: details.domain,
+            path: details.path,
+            secure: details.secure,
+            httpOnly: details.httpOnly,
+            expirationDate: details.expirationDate,
+            storeId: details.storeId
+        },
+        cookieId
+    });
+    
+    return {
+        abort: () => {
+            port.disconnect();
+        }
+    };
   };
 
   // Modern GM.* API
@@ -179,6 +328,8 @@ export const GM_API_CODE = `
   window.GM.log = (message) => window.GM_log(message);
   window.GM.notification = (details, ondone) => window.GM_notification(details, ondone);
   window.GM.openInTab = (url, options) => window.GM_openInTab(url, options);
+  window.GM.download = (details) => window.GM_download(details);
+  window.GM.cookie = (action, details, callback) => window.GM_cookie(action, details, callback);
   window.GM.info = window.GM_info;
 
   // Menu Commands

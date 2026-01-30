@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, useCallback } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { db } from "~lib/db"
 import { matchesUrl } from "~lib/matcher"
@@ -11,8 +11,59 @@ const PopupIndex = () => {
   const [activeTab, setActiveTab] = useState<chrome.tabs.Tab | null>(null)
   const [runningScripts, setRunningScripts] = useState<any[]>([])
   const [menuCommands, setMenuCommands] = useState<any[]>([])
+  const [darkMode, setDarkMode] = useState<boolean | null>(null)
   
   const scripts = useLiveQuery(() => db.scripts.toArray(), []) || []
+
+  // Initialize dark mode
+  useEffect(() => {
+    const initDarkMode = async () => {
+      try {
+        const result = await chrome.storage.local.get('darkMode') as { darkMode?: boolean }
+        const storedDarkMode = result.darkMode
+        
+        if (storedDarkMode !== undefined) {
+          setDarkMode(storedDarkMode)
+          if (storedDarkMode) {
+            document.documentElement.classList.add('dark')
+          } else {
+            document.documentElement.classList.remove('dark')
+          }
+        } else {
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          setDarkMode(prefersDark)
+          if (prefersDark) {
+            document.documentElement.classList.add('dark')
+          }
+        }
+      } catch (error) {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+        setDarkMode(prefersDark)
+        if (prefersDark) {
+          document.documentElement.classList.add('dark')
+        }
+      }
+    }
+    
+    initDarkMode()
+    
+    // Listen for system preference changes
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const handleChange = (e: MediaQueryListEvent) => {
+      chrome.storage.local.get('darkMode').then((result) => {
+        if (result.darkMode === undefined) {
+          setDarkMode(e.matches)
+          if (e.matches) {
+            document.documentElement.classList.add('dark')
+          } else {
+            document.documentElement.classList.remove('dark')
+          }
+        }
+      })
+    }
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -61,14 +112,14 @@ const PopupIndex = () => {
   }
 
   return (
-    <div className="w-80 bg-zinc-950 text-zinc-100 font-sans shadow-2xl">
-      <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+    <div className="w-80 bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans shadow-2xl">
+      <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-200/50 dark:bg-zinc-900/50">
         <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-emerald-500 rounded flex items-center justify-center text-zinc-950 font-bold text-xs">A</div>
-            <span className="font-bold text-emerald-500">AnotherMonkey</span>
+            <div className="w-6 h-6 bg-emerald-500 rounded flex items-center justify-center text-white font-bold text-xs">A</div>
+            <span className="font-bold text-emerald-600 dark:text-emerald-500">AnotherMonkey</span>
         </div>
         <div className="flex gap-2">
-            <button onClick={openDashboard} className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors">
+            <button onClick={openDashboard} className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors">
                 <Settings size={16} />
             </button>
         </div>
@@ -77,16 +128,16 @@ const PopupIndex = () => {
       <div className="max-h-96 overflow-y-auto">
         {/* Menu Commands Section */}
         {menuCommands.length > 0 && (
-            <div className="p-2 border-b border-zinc-800">
-                <div className="px-2 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Commands</div>
+            <div className="p-2 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="px-2 py-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Commands</div>
                 <div className="space-y-1 mt-1">
                     {menuCommands.map(cmd => (
                         <button 
                             key={cmd.id}
                             onClick={() => executeCommand(cmd.id, cmd.scriptId)}
-                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-emerald-500/10 hover:text-emerald-400 rounded text-sm text-zinc-300 transition-colors text-left"
+                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400 rounded text-sm text-zinc-700 dark:text-zinc-300 transition-colors text-left"
                         >
-                            <MenuIcon size={14} className="shrink-0 text-emerald-600" />
+                            <MenuIcon size={14} className="shrink-0 text-emerald-600 dark:text-emerald-500" />
                             <span className="truncate">{cmd.caption}</span>
                         </button>
                     ))}
@@ -96,24 +147,24 @@ const PopupIndex = () => {
 
         {/* Running Scripts Section (Estimated) */}
         <div className="p-2">
-            <div className="px-2 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Scripts for this site</div>
+            <div className="px-2 py-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Scripts for this site</div>
             <div className="space-y-1 mt-1">
                 {scripts.filter(s => {
                     if (!activeTab?.url) return false;
                     return matchesUrl([...s.metadata.matches, ...s.metadata.includes], activeTab.url) && !matchesUrl(s.metadata.excludes, activeTab.url);
                 }).map(script => (
-                    <div key={script.id} className="flex items-center justify-between px-3 py-2 hover:bg-zinc-900 rounded group">
+                    <div key={script.id} className="flex items-center justify-between px-3 py-2 hover:bg-zinc-200 dark:hover:bg-zinc-900 rounded group">
                         <div className="flex flex-col overflow-hidden">
-                            <span className={clsx("text-sm truncate", script.enabled ? "text-zinc-200" : "text-zinc-600")}>
+                            <span className={clsx("text-sm truncate", script.enabled ? "text-zinc-900 dark:text-zinc-200" : "text-zinc-500 dark:text-zinc-600")}>
                                 {script.metadata.name}
                             </span>
-                            <span className="text-[10px] text-zinc-500">{script.metadata.version}</span>
+                            <span className="text-[10px] text-zinc-500 dark:text-zinc-500">{script.metadata.version}</span>
                         </div>
                         <button 
                             onClick={() => handleToggle(script.id, !script.enabled)}
                             className={clsx(
                                 "p-1.5 rounded transition-colors",
-                                script.enabled ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-700 bg-zinc-800"
+                                script.enabled ? "text-emerald-500 bg-emerald-500/10" : "text-zinc-400 dark:text-zinc-600 bg-zinc-200 dark:bg-zinc-800"
                             )}
                         >
                             <Power size={14} />
@@ -121,7 +172,7 @@ const PopupIndex = () => {
                     </div>
                 ))}
                 {scripts.length === 0 && (
-                    <div className="p-4 text-center text-zinc-600 text-xs italic">
+                    <div className="p-4 text-center text-zinc-500 dark:text-zinc-600 text-xs italic">
                         No scripts installed
                     </div>
                 )}
@@ -129,10 +180,10 @@ const PopupIndex = () => {
         </div>
       </div>
 
-      <div className="p-3 bg-zinc-900/30 border-t border-zinc-800 text-center">
+      <div className="p-3 bg-zinc-200/30 dark:bg-zinc-900/30 border-t border-zinc-200 dark:border-zinc-800 text-center">
         <button 
             onClick={openDashboard}
-            className="text-xs text-zinc-500 hover:text-emerald-500 transition-colors flex items-center justify-center gap-1 w-full"
+            className="text-xs text-zinc-600 dark:text-zinc-500 hover:text-emerald-500 dark:hover:text-emerald-400 transition-colors flex items-center justify-center gap-1 w-full"
         >
             Manage all scripts <ExternalLink size={10} />
         </button>

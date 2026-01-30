@@ -43,3 +43,43 @@ export interface GMValue {
   key: string;
   value: any;
 }
+
+export interface Cookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  expirationDate?: number;
+  session: boolean;
+  hostOnly: boolean;
+  sameSite: "no_restriction" | "lax" | "strict" | "unspecified";
+}
+
+export interface GMCookieDetails {
+  url: string;
+  name?: string;
+  value?: string;
+  domain?: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  expirationDate?: number;
+  storeId?: string;
+}
+
+export interface GMNotificationButton {
+  title: string;
+  onClick?: () => void;
+}
+
+export interface GMNotificationDetails {
+  text?: string;
+  title?: string;
+  imageUrl?: string;
+  onclick?: () => void;
+  ondone?: () => void;
+  buttons?: GMNotificationButton[];
+  timeout?: number;
+}

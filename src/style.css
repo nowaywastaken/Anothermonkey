@@ -2,6 +2,69 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Dark mode CSS variables */
+:root {
+  --color-bg-primary: #fafafa;
+  --color-bg-secondary: #f4f4f5;
+  --color-bg-tertiary: #e4e4e7;
+  --color-text-primary: #18181b;
+  --color-text-secondary: #52525b;
+  --color-text-muted: #71717a;
+  --color-border-primary: #e4e4e7;
+  --color-border-secondary: #d4d4d8;
+}
+
+/* Dark mode */
+.dark {
+  --color-bg-primary: #18181b;
+  --color-bg-secondary: #27272a;
+  --color-bg-tertiary: #3f3f46;
+  --color-text-primary: #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+  --color-border-primary: #3f3f46;
+  --color-border-secondary: #52525b;
+}
+
+/* Auto-detect system preference */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --color-bg-primary: #18181b;
+    --color-bg-secondary: #27272a;
+    --color-bg-tertiary: #3f3f46;
+    --color-text-primary: #f4f4f5;
+    --color-text-secondary: #a1a1aa;
+    --color-text-muted: #71717a;
+    --color-border-primary: #3f3f46;
+    --color-border-secondary: #52525b;
+  }
+}
+
 body {
-  @apply bg-zinc-900 text-zinc-100;
+  @apply bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100;
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition-property: background-color, border-color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-in-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-zinc-100 dark:bg-zinc-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-300 dark:bg-zinc-600 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-zinc-400 dark:bg-zinc-500;
 }
