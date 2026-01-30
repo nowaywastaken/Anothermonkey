@@ -24,12 +24,20 @@ async function checkConnect(scriptId: string, url: string): Promise<boolean> {
 
     try {
         const targetHost = new URL(url).hostname;
+        
+        // Check static metadata permissions
         for (const domain of allowedDomains) {
-            // Simple domain match, wildcard support, or direct equality
             if (domain === '*' || targetHost === domain || (domain.startsWith('*') && targetHost.endsWith(domain.substring(1)))) {
                 return true;
             }
         }
+
+        // Check dynamic user-granted permissions
+        const userPerm = await db.permissions.get([scriptId, targetHost]);
+        if (userPerm && userPerm.allow) {
+            return true;
+        }
+
     } catch (e) {
         return false; // Invalid URL
     }

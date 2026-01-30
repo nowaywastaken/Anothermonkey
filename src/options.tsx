@@ -6,7 +6,8 @@ import { ScriptList } from "~components/ScriptList"
 import { ScriptEditor } from "~components/ScriptEditor"
 import { type UserScript } from "~lib/types"
 import { bulkEnable, bulkDisable, bulkDelete, checkForUpdates, getLastUpdateCheck, checkScriptUpdate, updateScript, type UpdateCheckResult } from "~lib/script-manager"
-import { Moon, Sun } from "lucide-react"
+import { Moon, Sun, Cloud, CloudDownload, CloudUpload, RefreshCw } from "lucide-react"
+import { getAuthToken, findBackupFile, uploadBackup, downloadBackup, restoreFromBackup } from "~lib/cloud-sync"
 
 import "~style.css"
 
@@ -41,6 +42,10 @@ const OptionsIndex = () => {
   const [availableUpdates, setAvailableUpdates] = useState<UpdateCheckResult[]>([])
   const [lastUpdateCheck, setLastUpdateCheck] = useState<number | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
+
+  // Cloud Sync state
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<string | null>(null)
 
   // Dark mode state
   const [darkMode, setDarkMode] = useState<boolean | null>(null)
@@ -381,6 +386,53 @@ const OptionsIndex = () => {
     return date.toLocaleString()
   }
 
+  const handleCloudBackup = async () => {
+    setIsSyncing(true)
+    setSyncStatus("Authenticating...")
+    try {
+      const token = await getAuthToken(true)
+      setSyncStatus("Finding backup file...")
+      const fileId = await findBackupFile(token)
+      setSyncStatus("Uploading data...")
+      await uploadBackup(token, fileId)
+      alert("Successfully backed up to Google Drive!")
+    } catch (error: any) {
+      alert(`Cloud Backup failed: ${error.message}`)
+    } finally {
+      setIsSyncing(false)
+      setSyncStatus(null)
+    }
+  }
+
+  const handleCloudRestore = async () => {
+    if (!confirm("This will overwrite existing scripts with the versions from the cloud. Are you sure?")) return
+
+    setIsSyncing(true)
+    setSyncStatus("Authenticating...")
+    try {
+      const token = await getAuthToken(true)
+      setSyncStatus("Finding backup file...")
+      const fileId = await findBackupFile(token)
+      
+      if (!fileId) {
+        alert("No backup file found in your Google Drive.")
+        return
+      }
+
+      setSyncStatus("Downloading data...")
+      const backupData = await downloadBackup(token, fileId)
+      setSyncStatus("Restoring data...")
+      await restoreFromBackup(backupData)
+      alert("Successfully restored from Google Drive!")
+      triggerSync() // Sync with browser registry
+    } catch (error: any) {
+      alert(`Cloud Restore failed: ${error.message}`)
+    } finally {
+      setIsSyncing(false)
+      setSyncStatus(null)
+    }
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans">
       <>
@@ -423,6 +475,33 @@ const OptionsIndex = () => {
               </span>
             </div>
             
+            {/* Cloud Sync Section */}
+            <div className="flex items-center gap-2 border-l border-zinc-200 dark:border-zinc-800 pl-4 ml-4">
+              <button
+                onClick={handleCloudBackup}
+                disabled={isSyncing}
+                className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md text-zinc-600 dark:text-zinc-400 hover:text-sky-500 transition-colors flex items-center gap-2"
+                title="Backup to Cloud"
+              >
+                {isSyncing && syncStatus?.includes("Upload") ? <RefreshCw size={18} className="animate-spin" /> : <CloudUpload size={18} />}
+                <span className="text-sm hidden xl:inline">Backup</span>
+              </button>
+              <button
+                onClick={handleCloudRestore}
+                disabled={isSyncing}
+                className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md text-zinc-600 dark:text-zinc-400 hover:text-amber-500 transition-colors flex items-center gap-2"
+                title="Restore from Cloud"
+              >
+                {isSyncing && syncStatus?.includes("Download") ? <RefreshCw size={18} className="animate-spin" /> : <CloudDownload size={18} />}
+                <span className="text-sm hidden xl:inline">Restore</span>
+              </button>
+              {isSyncing && (
+                <span className="text-xs text-sky-500 animate-pulse ml-2 px-2 py-1 bg-sky-500/10 rounded-full">
+                  {syncStatus}
+                </span>
+              )}
+            </div>
+
             {/* Dark Mode Toggle */}
             <div className="flex items-center gap-2">
               <Sun size={16} className="text-zinc-500 dark:text-zinc-400" />

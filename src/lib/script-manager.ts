@@ -1,54 +1,65 @@
 import { db } from "./db"
 import { GM_API_CODE } from "./gm-api"
 import { matchesUrl } from "./matcher"
-import type { UserScript } from "./types"
+import type { UserScript, ScriptMetadata } from "./types"
 
-const MATCHER_CODE = `
-function patternToRegExp(pattern) {
-  if (pattern === '<all_urls>') {
-    return /^(https?|file|ftp):\\/\\/.*/;
-  }
-  const match = /^(https?|\\*|file|ftp):\\/\\/([^\\/]+)(\\/.*)$/.exec(pattern);
-  if (!match) {
-    throw new Error(\`Invalid match pattern: \${pattern}\`);
-  }
-  let [, scheme, host, path] = match;
-  let re = '^' + (scheme === '*' ? 'https?' : scheme) + ':\\/\\/';
-  if (host === '*') {
-    re += '[^/]+';
-  } else if (host.startsWith('*.')) {
-    re += '[^/]+\\.' + host.substring(2).replace(/\\./g, '\\\\.');
-  } else {
-    re += host.replace(/\\./g, '\\\\.');
-  }
-  re += path.replace(/[?.+^${}()|[\\\\]/g, '\\\\$&').replace(/\\\\\\*/g, '.*');
-  re += '$';
-  return new RegExp(re);
+export interface UpdateCheckResult {
+    scriptId: string;
+    scriptName: string;
+    currentVersion: string;
+    newVersion: string;
+    newCode: string;
+    newMetadata: ScriptMetadata;
 }
-function ANMON_matchPattern(pattern, url) {
-  if (pattern === '*') return true;
-  if (pattern === '<all_urls>') {
-    return /^(https?|file|ftp):\\/\\//.test(url);
-  }
-  if (pattern.startsWith('/') && pattern.endsWith('/')) {
-    try {
-      const regex = new RegExp(pattern.substring(1, pattern.length - 1));
-      return regex.test(url);
-    } catch (e) { return false; }
-  }
-  if (pattern.includes('://')) {
-    try {
-      const regex = patternToRegExp(pattern);
-      return regex.test(url);
-    } catch (e) {}
-  }
-  try {
-    const reString = pattern.replace(/[?.+^${}()|[\\\\]/g, '\\\\$&').replace(/\\*/g, '.*');
-    const regex = new RegExp(\`^\${reString}$\`);
-    return regex.test(url);
-  } catch (e) { return false; }
-}
-`;
+
+const MATCHER_CODE = [
+  "(function() {",
+  "  function patternToRegExp(pattern) {",
+  "    if (pattern === '<all_urls>') {",
+  "      return /^(https?|file|ftp):\\/\\/.*/;",
+  "    }",
+  "    const match = /^(https?|\\*|file|ftp):\\/\\/([^\\/]+)(\\/.*)$/.exec(pattern);",
+  "    if (!match) {",
+  "      throw new Error('Invalid match pattern: ' + pattern);",
+  "    }",
+  "    let [, scheme, host, path] = match;",
+  "    let re = '^' + (scheme === '*' ? 'https?' : scheme) + ':\\\\/\\\\/';",
+  "    if (host === '*') {",
+  "      re += '[^/]+';",
+  "    } else if (host.startsWith('*.')) {",
+  "      re += '[^/]+\\\\.' + host.substring(2).replace(/\\./g, '\\\\.');",
+  "    } else {",
+  "      re += host.replace(/\\./g, '\\\\.');",
+  "    }",
+  "    re += path.replace(/[?.+^${}()|[\\\\\\]]/g, '\\\\$&').replace(/\\\\*/g, '.*');",
+  "    re += '$';",
+  "    return new RegExp(re);",
+  "  }",
+  "  window.ANMON_matchPattern = function(pattern, url) {",
+  "    if (pattern === '*') return true;",
+  "    if (pattern === '<all_urls>') {",
+  "      return /^(https?|file|ftp):\\/\\//.test(url);",
+  "    }",
+  "    if (pattern.startsWith('/') && pattern.endsWith('/')) {",
+  "      try {",
+  "        const regex = new RegExp(pattern.substring(1, pattern.length - 1));",
+  "        return regex.test(url);",
+  "      } catch (e) { return false; }",
+  "    }",
+  "    if (pattern.includes('://')) {",
+  "      try {",
+  "        const regex = patternToRegExp(pattern);",
+  "        return regex.test(url);",
+  "      } catch (e) {}",
+  "    }",
+  "    try {",
+  "      const reString = pattern.replace(/[?.+^${}()|[\\\\\\]]/g, '\\\\$&').replace(/\\*/g, '.*');",
+  "      const regex = new RegExp('^' + reString + '$');",
+  "      return regex.test(url);",
+  "    } catch (e) { return false; }",
+  "  };",
+  "})();"
+].join("\n");
 
 async function buildScriptPayload(script: UserScript): Promise<{js: {code: string}[], world: "MAIN" | "USER_SCRIPT"}> {
     const isGrantNone = script.metadata.grants.length === 0 || 
@@ -160,7 +171,7 @@ export async function syncScripts() {
       if (world === "MAIN") {
           registration.world = "MAIN";
       } else {
-          registration.worldId = script.id; // Isolate each script in its own world
+          registration.world = "ISOLATED";
       }
       return registration;
     }
@@ -192,56 +203,21 @@ export async function syncScripts() {
   }
 }
 
-export async function checkForUpdates() {
+export async function checkForUpdates(): Promise<UpdateCheckResult[]> {
     console.log("Checking for script updates...");
     const scripts = await db.scripts.toArray();
+    const results: UpdateCheckResult[] = [];
     
     for (const script of scripts) {
-        const updateUrl = script.metadata.updateURL || script.metadata.downloadURL;
-        if (!updateUrl) continue;
-        
-        try {
-            const response = await fetch(updateUrl);
-            if (!response.ok) continue;
-            
-            const code = await response.text();
-            const { parseMetadata } = await import("./parser");
-            const newMetadata = parseMetadata(code);
-            
-            if (isNewerVersion(newMetadata.version, script.metadata.version)) {
-                console.log(`Updating script: ${script.metadata.name} (${script.metadata.version} -> ${newMetadata.version})`);
-                
-                const dependencies: Record<string, string> = {};
-                const toFetch = [
-                    ...newMetadata.requires.map(url => ({ url, type: 'require' })),
-                    ...newMetadata.resources.map(res => ({ url: res.url, type: 'resource' }))
-                ];
-
-                await Promise.all(toFetch.map(async (item) => {
-                    try {
-                        const res = await fetch(item.url);
-                        if (res.ok) dependencies[item.url] = await res.text();
-                    } catch (e) {
-                        console.error(`Failed to fetch dependency ${item.url}:`, e);
-                    }
-                }));
-
-                await db.scripts.update(script.id, {
-                    code,
-                    metadata: newMetadata,
-                    lastModified: Date.now(),
-                    dependencyCache: {
-                        ...script.dependencyCache,
-                        ...dependencies
-                    }
-                });
-            }
-        } catch (error) {
-            console.error(`Failed to update script ${script.metadata.name}:`, error);
+        const result = await checkScriptUpdate(script);
+        if (result) {
+            results.push(result);
         }
     }
     
-    await syncScripts();
+    const lastUpdate = Date.now();
+    await chrome.storage.local.set({ lastUpdateCheck: lastUpdate });
+    return results;
 }
 
 function isNewerVersion(newVer: string, oldVer: string): boolean {
@@ -284,9 +260,9 @@ async function injectIntoExistingTabs(script: UserScript) {
 
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                func: (code) => {
+                func: (code: any) => {
                     try {
-                        eval(code);
+                        eval(code as string);
 
                     } catch (e) {
                         console.error("Error executing script in target world:", e);
@@ -295,10 +271,117 @@ async function injectIntoExistingTabs(script: UserScript) {
                 args: [fullCode],
                 world: injectionWorld,
             });
-        } catch (e) {
+        } catch (e: any) {
             if (!e.message.includes("Cannot access") && !e.message.includes("Missing host permission") && !e.message.includes("No tab with id")) {
                  console.error(`Failed to inject script "${script.metadata.name}" into tab ${tab.id}:`, e);
             }
         }
     }
+}
+export async function bulkEnable(ids: string[]) {
+    let success = 0;
+    let failed = 0;
+    for (const id of ids) {
+        try {
+            await db.scripts.update(id, { enabled: true });
+            success++;
+        } catch (e) {
+            failed++;
+        }
+    }
+    await syncScripts();
+    return { success, failed };
+}
+
+export async function bulkDisable(ids: string[]) {
+    let success = 0;
+    let failed = 0;
+    for (const id of ids) {
+        try {
+            await db.scripts.update(id, { enabled: false });
+            success++;
+        } catch (e) {
+            failed++;
+        }
+    }
+    await syncScripts();
+    return { success, failed };
+}
+
+export async function bulkDelete(ids: string[]) {
+    let success = 0;
+    let failed = 0;
+    for (const id of ids) {
+        try {
+            await db.scripts.delete(id);
+            success++;
+        } catch (e) {
+            failed++;
+        }
+    }
+    await syncScripts();
+    return { success, failed };
+}
+
+export async function getLastUpdateCheck(): Promise<number | null> {
+    const result = await chrome.storage.local.get("lastUpdateCheck");
+    return (result.lastUpdateCheck as number) || null;
+}
+
+export async function checkScriptUpdate(script: UserScript): Promise<UpdateCheckResult | null> {
+    const updateUrl = script.metadata.updateURL || script.metadata.downloadURL;
+    if (!updateUrl) return null;
+
+    try {
+        const response = await fetch(updateUrl);
+        if (!response.ok) return null;
+
+        const code = await response.text();
+        const { parseMetadata } = await import("./parser");
+        const newMetadata = parseMetadata(code);
+
+        if (isNewerVersion(newMetadata.version, script.metadata.version)) {
+            return {
+                scriptId: script.id,
+                scriptName: script.metadata.name,
+                currentVersion: script.metadata.version,
+                newVersion: newMetadata.version,
+                newCode: code,
+                newMetadata
+            };
+        }
+    } catch (e) {
+        console.error(`Update check failed for ${script.metadata.name}:`, e);
+    }
+    return null;
+}
+
+export async function updateScript(scriptId: string, code: string, metadata: ScriptMetadata) {
+    const script = await db.scripts.get(scriptId);
+    if (!script) return;
+
+    const dependencies: Record<string, string> = { ...script.dependencyCache };
+    const toFetch = [
+        ...metadata.requires.map(url => ({ url, type: 'require' })),
+        ...metadata.resources.map(res => ({ url: res.url, type: 'resource' }))
+    ];
+
+    await Promise.all(toFetch.map(async (item) => {
+        if (dependencies[item.url]) return;
+        try {
+            const res = await fetch(item.url);
+            if (res.ok) dependencies[item.url] = await res.text();
+        } catch (e) {
+            console.error(`Failed to fetch dependency ${item.url}:`, e);
+        }
+    }));
+
+    await db.scripts.update(scriptId, {
+        code,
+        metadata,
+        lastModified: Date.now(),
+        dependencyCache: dependencies
+    });
+    
+    await syncScripts();
 }

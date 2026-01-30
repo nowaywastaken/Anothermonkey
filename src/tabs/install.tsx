@@ -11,6 +11,8 @@ const InstallTab = () => {
   const [metadata, setMetadata] = useState<ScriptMetadata | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isInstalling, setIsInstalling] = useState(false)
+  const [showCode, setShowCode] = useState(false)
+  const [preApprovedConnects, setPreApprovedConnects] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     chrome.runtime.sendMessage({ action: "get_pending_script" }, (response) => {
@@ -19,7 +21,7 @@ const InstallTab = () => {
         try {
           const meta = parseMetadata(response.code)
           setMetadata(meta)
-        } catch (e) {
+        } catch (e: any) {
           setError(e.message)
         }
       } else {
@@ -60,6 +62,16 @@ const InstallTab = () => {
         };
 
         await db.scripts.add(newScript);
+        
+        // Add pre-approved permissions
+        for (const domain of preApprovedConnects) {
+            await db.permissions.put({
+                scriptId: id,
+                domain,
+                allow: true
+            });
+        }
+
         await chrome.runtime.sendMessage({ action: "sync_scripts" });
         
         // Give a moment for the user to see the confirmation
@@ -67,7 +79,7 @@ const InstallTab = () => {
             window.close();
         }, 500);
 
-    } catch (e) {
+    } catch (e: any) {
         setError("Failed to install script: " + e.message);
         setIsInstalling(false);
     }
@@ -127,13 +139,42 @@ const InstallTab = () => {
 
         {metadata.connects.length > 0 && (
             <div className="p-4 rounded-lg mb-8 bg-sky-900/50 border border-sky-700">
-                <h3 className="font-semibold text-lg mb-3 flex items-center gap-2"><Link/> Network Access</h3>
-                 <p className="text-sm text-zinc-400 mb-4">This script can make requests to the following domains:</p>
-                 <div className="flex flex-wrap gap-2">
-                    {metadata.connects.map(c => <span key={c} className="bg-zinc-700 text-zinc-200 font-mono text-xs px-2 py-1 rounded">{c}</span>)}
+                <h3 className="font-semibold text-lg mb-3 flex items-center gap-2"><Link size={18}/> Network Access</h3>
+                 <p className="text-sm text-zinc-400 mb-4">This script can make requests to the following domains. You can pre-approve them now:</p>
+                 <div className="flex flex-col gap-2">
+                    {metadata.connects.map(c => (
+                        <label key={c} className="flex items-center gap-3 bg-zinc-800/50 px-3 py-2 rounded hover:bg-zinc-800 transition-colors cursor-pointer group">
+                            <input 
+                                type="checkbox" 
+                                checked={preApprovedConnects.has(c)}
+                                onChange={(e) => {
+                                    const next = new Set(preApprovedConnects);
+                                    if (e.target.checked) next.add(c);
+                                    else next.delete(c);
+                                    setPreApprovedConnects(next);
+                                }}
+                                className="w-4 h-4 rounded border-zinc-700 text-sky-500 focus:ring-sky-500 focus:ring-offset-zinc-900 bg-zinc-900"
+                            />
+                            <span className="text-zinc-300 font-mono text-xs group-hover:text-zinc-100">{c}</span>
+                        </label>
+                    ))}
                 </div>
             </div>
         )}
+
+        <div className="mb-8">
+            <button 
+                onClick={() => setShowCode(!showCode)}
+                className="text-zinc-400 hover:text-zinc-200 text-sm flex items-center gap-2 transition-colors"
+            >
+                {showCode ? "Hide Script Source" : "View Script Source"}
+            </button>
+            {showCode && (
+                <div className="mt-4 bg-zinc-950 rounded border border-zinc-800 p-4 max-h-[400px] overflow-auto font-mono text-xs text-zinc-400 whitespace-pre">
+                    {code}
+                </div>
+            )}
+        </div>
 
         <div className="flex justify-end gap-4 mt-8">
           <button onClick={handleCancel} className="px-6 py-2 rounded bg-zinc-700 hover:bg-zinc-600 transition-colors">

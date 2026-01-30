@@ -39,8 +39,14 @@
       "tabs",
       "scripting",
       "activeTab",
-      "notifications"
+      "notifications",
+      "identity"
     ],
+    "oauth2": {
+      "scopes": [
+        "https://www.googleapis.com/auth/drive.file"
+      ]
+    },
     "host_permissions": [
       "<all_urls>"
     ]

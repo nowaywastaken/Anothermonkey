@@ -191,7 +191,12 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
     
     // Handle built-in notifications (connect-blocked, download-connect-blocked)
     if (notificationId.startsWith('connect-blocked::') || notificationId.startsWith('download-connect-blocked::')) {
-        chrome.runtime.openOptionsPage();
+        const parts = notificationId.split('::');
+        const scriptId = parts[1];
+        const url = parts.slice(2).join('::');
+        const domain = new URL(url).hostname;
+        
+        chrome.tabs.create({ url: `tabs/permission.html?scriptId=${scriptId}&domain=${domain}` });
         chrome.notifications.clear(notificationId);
         return;
     }

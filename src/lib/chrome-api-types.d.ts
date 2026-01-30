@@ -122,7 +122,7 @@ declare namespace chrome.runtime {
 
   function getManifest(): Manifest;
   function getURL(path: string): string;
-  function sendMessage(message: unknown): Promise<unknown>;
+  function sendMessage(message: unknown, callback?: (response: any) => void): Promise<unknown>;
   function openOptionsPage(): Promise<void>;
 
   const onMessage: {

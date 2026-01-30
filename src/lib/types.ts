@@ -83,3 +83,17 @@ export interface GMNotificationDetails {
   buttons?: GMNotificationButton[];
   timeout?: number;
 }
+
+export interface UserPermission {
+  scriptId: string;
+  domain: string;
+  allow: boolean;
+}
+
+export interface SyncItem {
+  id: string;
+  scriptId: string;
+  lastSynced: number;
+  remoteId?: string;
+  status: 'synced' | 'pending' | 'conflict';
+}

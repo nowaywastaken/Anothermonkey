@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react"
-import Editor from "@monaco-editor/react"
+import Editor, { type BeforeMount } from "@monaco-editor/react"
 import { Save, AlertCircle, Loader2 } from "lucide-react"
+import { GM_TYPES } from "~lib/gm-types"
 
 interface ScriptEditorProps {
   initialCode: string
@@ -40,6 +41,19 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ initialCode, onSave,
       onSave(code)
     }
   }, [code, isSaving, onSave])
+
+  const handleEditorWillMount = (monaco: any) => {
+    // Add GM API types to the editor
+    monaco.languages.typescript.javascriptDefaults.setExtraLibs([{
+      content: GM_TYPES,
+      filePath: 'ts:gm.d.ts'
+    }]);
+
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+        allowNonTsExtensions: true,
+        target: monaco.languages.typescript.ScriptTarget.ESNext,
+    });
+  }
 
   // Ctrl+S handler
   useEffect(() => {
@@ -81,6 +95,7 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ initialCode, onSave,
           theme={editorTheme}
           value={code}
           onChange={handleChange}
+          beforeMount={handleEditorWillMount}
           options={{
             minimap: { enabled: false },
             fontSize: 14,
