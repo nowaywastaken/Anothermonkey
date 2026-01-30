@@ -14,7 +14,8 @@ declare namespace chrome.userScripts {
     css?: ScriptSource[];
     js?: ScriptSource[];
     runAt?: "document_start" | "document_end" | "document_idle";
-    world?: "ISOLATED" | "MAIN";
+    world?: "ISOLATED" | "MAIN" | "USER_SCRIPT";
+    worldId?: string;  // Unique world ID for script isolation
   }
 
   type RegisteredUserScript = RegisteredUserScriptOptions;
@@ -26,6 +27,7 @@ declare namespace chrome.userScripts {
   function unregister(filter?: { ids?: string[] }): Promise<void>;
   function update(scripts: RegisteredUserScriptOptions[]): Promise<void>;
   function configureWorld(options: {
+    worldId?: string;  // Configure a specific world by ID
     csp?: string;
     messaging?: boolean;
   }): Promise<void>;

@@ -162,6 +162,7 @@ export async function syncScripts() {
 
       const registration: chrome.userScripts.RegisteredUserScriptOptions = {
         id: script.id,
+        worldId: script.id,  // Use script UUID as unique world ID for isolation
         matches,
         excludeMatches: script.metadata.excludes.filter(e => !e.startsWith("/") || !e.endsWith("/")),
         js,
@@ -171,7 +172,8 @@ export async function syncScripts() {
       if (world === "MAIN") {
           registration.world = "MAIN";
       } else {
-          registration.world = "ISOLATED";
+          // Use USER_SCRIPT world with unique worldId for proper isolation
+          registration.world = "USER_SCRIPT";
       }
       return registration;
     }
@@ -233,7 +235,7 @@ function isNewerVersion(newVer: string, oldVer: string): boolean {
     return false;
 }
 
-async function injectIntoExistingTabs(script: UserScript) {
+export async function injectIntoExistingTabs(script: UserScript) {
     const allTabs = await chrome.tabs.query({
         url: ["http://*/*", "https://*/*", "file://*/*"]
     });

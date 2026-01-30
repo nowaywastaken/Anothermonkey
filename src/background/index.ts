@@ -1,4 +1,5 @@
-import { syncScripts, checkForUpdates } from "../lib/script-manager"
+import { syncScripts, checkForUpdates, injectIntoExistingTabs } from "../lib/script-manager"
+import { db } from "../lib/db"
 import { handleGMRequest, xhrControllers, downloadPorts } from "./api-handler"
 
 console.log("AnotherMonkey Background Service Starting...")
@@ -49,6 +50,22 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
         .then(response => sendResponse(response))
         .catch(err => sendResponse({ error: err.message }));
       return true; // async response
+  }
+
+  // Handle immediate injection into existing tabs
+  if (msg.action === "inject_existing_tabs") {
+    const scriptId = msg.scriptId as string;
+    if (scriptId) {
+      db.scripts.get(scriptId).then(script => {
+        if (script && script.enabled) {
+          return injectIntoExistingTabs(script);
+        }
+      }).then(() => sendResponse({ status: "success" }))
+        .catch(err => sendResponse({ error: err.message }));
+    } else {
+      sendResponse({ error: "Missing scriptId" });
+    }
+    return true; // async response
   }
 })
 
@@ -304,10 +321,31 @@ setupUpdateAlarm();
 syncScripts()
 checkForUpdates() // Also check on startup
 
-// Configure the User Script world
+// Configure the default User Script world
 if (chrome.userScripts && chrome.userScripts.configureWorld) {
     chrome.userScripts.configureWorld({
         messaging: true,
         csp: "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; object-src 'none'"
     })
 }
+
+// Configure individual worlds for each script (for isolation)
+async function configureScriptWorlds() {
+    if (!chrome.userScripts || !chrome.userScripts.configureWorld) return;
+    
+    const scripts = await db.scripts.where("enabled").equals(1 as any).toArray();
+    for (const script of scripts) {
+        try {
+            await chrome.userScripts.configureWorld({
+                worldId: script.id,
+                messaging: true,
+                csp: "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; object-src 'none'"
+            });
+        } catch (e) {
+            console.debug(`Failed to configure world for script ${script.id}:`, e);
+        }
+    }
+}
+
+// Configure script worlds after initial sync
+configureScriptWorlds();

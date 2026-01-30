@@ -287,7 +287,11 @@ const OptionsIndex = () => {
 
   const handleToggle = async (id: string, enabled: boolean) => {
     await db.scripts.update(id, { enabled })
-    triggerSync()
+    await chrome.runtime.sendMessage({ action: "sync_scripts" })
+    // If enabling a script, inject it immediately into matching open tabs
+    if (enabled) {
+      await chrome.runtime.sendMessage({ action: "inject_existing_tabs", scriptId: id })
+    }
   }
 
   const handleDelete = async (id: string) => {
