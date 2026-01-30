@@ -8,6 +8,7 @@ import { type UserScript } from "~lib/types"
 import { bulkEnable, bulkDisable, bulkDelete, checkForUpdates, getLastUpdateCheck, checkScriptUpdate, updateScript, type UpdateCheckResult } from "~lib/script-manager"
 import { Moon, Sun, Cloud, CloudDownload, CloudUpload, RefreshCw } from "lucide-react"
 import { getAuthToken, findBackupFile, uploadBackup, downloadBackup, restoreFromBackup } from "~lib/cloud-sync"
+import { logger } from "~lib/logger"
 
 import "~style.css"
 
@@ -24,7 +25,7 @@ const DEFAULT_SCRIPT = `// ==UserScript==
 (function() {
     'use strict';
 
-    console.log("Hello from AnotherMonkey!");
+    // Your code here!
 })();
 `
 
@@ -94,7 +95,7 @@ const OptionsIndex = () => {
           }
         }
       } catch (error) {
-        console.error('Failed to load dark mode preference:', error)
+        logger.error('Failed to load dark mode preference:', error)
         // Fallback to system preference
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
         setDarkMode(prefersDark)
@@ -145,7 +146,7 @@ const OptionsIndex = () => {
     try {
       await chrome.storage.local.set({ darkMode: newDarkMode })
     } catch (error) {
-      console.error('Failed to save dark mode preference:', error)
+      logger.error('Failed to save dark mode preference:', error)
     }
   }, [darkMode])
 
@@ -263,7 +264,7 @@ const OptionsIndex = () => {
               newDeps[url] = await res.text()
             }
           } catch (e) {
-            console.error("Failed to fetch dependency:", url, e)
+            logger.error("Failed to fetch dependency:", url, e)
           }
         }))
       }
@@ -308,7 +309,7 @@ const OptionsIndex = () => {
       alert(`Failed to enable ${result.failed} script(s). Check console for details.`)
     }
     if (result.success > 0) {
-      console.log(`Enabled ${result.success} script(s)`)
+      logger.debug(`Enabled ${result.success} script(s)`)
     }
   }
 
@@ -318,7 +319,7 @@ const OptionsIndex = () => {
       alert(`Failed to disable ${result.failed} script(s). Check console for details.`)
     }
     if (result.success > 0) {
-      console.log(`Disabled ${result.success} script(s)`)
+      logger.debug(`Disabled ${result.success} script(s)`)
     }
   }
 
@@ -328,7 +329,7 @@ const OptionsIndex = () => {
       alert(`Failed to delete ${result.failed} script(s). Check console for details.`)
     }
     if (result.success > 0) {
-      console.log(`Deleted ${result.success} script(s)`)
+      logger.debug(`Deleted ${result.success} script(s)`)
       if (selectedId && ids.includes(selectedId)) {
         setSelectedId(null)
       }

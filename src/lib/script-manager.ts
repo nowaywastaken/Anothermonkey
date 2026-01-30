@@ -2,6 +2,7 @@ import { db } from "./db"
 import { GM_API_CODE } from "./gm-api"
 import { matchesUrl } from "./matcher"
 import type { UserScript, ScriptMetadata } from "./types"
+import { logger } from "./logger"
 
 export interface UpdateCheckResult {
     scriptId: string;
@@ -125,10 +126,10 @@ if (isExcluded || !isIncluded) {
 }
 
 export async function syncScripts() {
-  console.log("Syncing scripts to browser...")
+  logger.info("Syncing scripts to browser...")
   try {
     if (!chrome.userScripts) {
-      console.error(
+      logger.error(
         "chrome.userScripts API is not available. Make sure you are on Chrome 120+ and have the permission."
       )
       return
@@ -182,33 +183,33 @@ export async function syncScripts() {
 
     if (scriptIdsToRemove.length > 0) {
         await chrome.userScripts.unregister({ ids: scriptIdsToRemove });
-        console.log(`Unregistered ${scriptIdsToRemove.length} scripts.`);
+        logger.debug(`Unregistered ${scriptIdsToRemove.length} scripts.`);
     }
     
     if (scriptsToAdd.length > 0) {
         const regs = await Promise.all(scriptsToAdd.map(buildRegistration));
         await chrome.userScripts.register(regs);
-        console.log(`Registered ${scriptsToAdd.length} new scripts.`);
+        logger.debug(`Registered ${scriptsToAdd.length} new scripts.`);
     }
 
     if (scriptsToUpdate.length > 0) {
         const regs = await Promise.all(scriptsToUpdate.map(buildRegistration));
         await chrome.userScripts.update(regs);
-        console.log(`Updated ${scriptsToUpdate.length} existing scripts.`);
+        logger.debug(`Updated ${scriptsToUpdate.length} existing scripts.`);
     }
     
     for (const script of dbScripts) {
         await injectIntoExistingTabs(script);
     }
     
-    console.log(`Sync complete. Added: ${scriptsToAdd.length}, Updated: ${scriptsToUpdate.length}, Removed: ${scriptIdsToRemove.length}.`)
+    logger.info(`Sync complete. Added: ${scriptsToAdd.length}, Updated: ${scriptsToUpdate.length}, Removed: ${scriptIdsToRemove.length}.`)
   } catch (error) {
-    console.error("Failed to sync scripts:", error)
+    logger.error("Failed to sync scripts:", error)
   }
 }
 
 export async function checkForUpdates(): Promise<UpdateCheckResult[]> {
-    console.log("Checking for script updates...");
+    logger.info("Checking for script updates...");
     const scripts = await db.scripts.toArray();
     const results: UpdateCheckResult[] = [];
     
@@ -269,7 +270,7 @@ export async function injectIntoExistingTabs(script: UserScript) {
                         eval(code as string);
 
                     } catch (e) {
-                        console.error("Error executing script in target world:", e);
+                        logger.error("Error executing script in target world:", e);
                     }
                 },
                 args: [fullCode],
@@ -277,7 +278,7 @@ export async function injectIntoExistingTabs(script: UserScript) {
             });
         } catch (e: any) {
             if (!e.message.includes("Cannot access") && !e.message.includes("Missing host permission") && !e.message.includes("No tab with id")) {
-                 console.error(`Failed to inject script "${script.metadata.name}" into tab ${tab.id}:`, e);
+                 logger.error(`Failed to inject script "${script.metadata.name}" into tab ${tab.id}:`, e);
             }
         }
     }
@@ -355,7 +356,7 @@ export async function checkScriptUpdate(script: UserScript): Promise<UpdateCheck
             };
         }
     } catch (e) {
-        console.error(`Update check failed for ${script.metadata.name}:`, e);
+        logger.error(`Update check failed for ${script.metadata.name}:`, e);
     }
     return null;
 }
@@ -376,7 +377,7 @@ export async function updateScript(scriptId: string, code: string, metadata: Scr
             const res = await fetch(item.url);
             if (res.ok) dependencies[item.url] = await res.text();
         } catch (e) {
-            console.error(`Failed to fetch dependency ${item.url}:`, e);
+            logger.error(`Failed to fetch dependency ${item.url}:`, e);
         }
     }));
 

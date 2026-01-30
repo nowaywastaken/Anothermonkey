@@ -3,6 +3,7 @@
  * supporting standard Chrome match patterns, regular expressions, and glob-style patterns
  * as seen in various userscript engines.
  */
+import { logger } from "./logger"
 
 /**
  * Converts a Chrome-style match pattern to a regular expression.
@@ -62,7 +63,7 @@ export function matchPattern(pattern: string, url: string): boolean {
       const regex = new RegExp(pattern.substring(1, pattern.length - 1));
       return regex.test(url);
     } catch (e) {
-      console.error('Invalid regex pattern:', pattern, e);
+      logger.warn('Invalid regex pattern:', pattern, e);
       return false;
     }
   }
@@ -86,7 +87,7 @@ export function matchPattern(pattern: string, url: string): boolean {
     const regex = new RegExp(`^${reString}$`);
     return regex.test(url);
   } catch (e) {
-    console.error('Invalid glob pattern:', pattern, e);
+    logger.warn('Invalid glob pattern:', pattern, e);
     return false;
   }
 }

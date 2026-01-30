@@ -1,8 +1,9 @@
 import { syncScripts, checkForUpdates, injectIntoExistingTabs } from "../lib/script-manager"
 import { db } from "../lib/db"
 import { handleGMRequest, xhrControllers, downloadPorts } from "./api-handler"
+import { logger } from "../lib/logger"
 
-console.log("AnotherMonkey Background Service Starting...")
+logger.info("AnotherMonkey Background Service Starting...")
 
 // Type for notification info stored in storage
 interface NotificationInfo {
@@ -255,7 +256,7 @@ chrome.contextMenus.onClicked.addListener((info: chrome.contextMenus.OnClickData
         chrome.tabs.sendMessage(tab.id, {
             action: "GM_menuCommandClicked",
             id: commandId
-        }).catch((e) => console.debug("Could not send menu click to tab, it might have been closed.", e));
+        }).catch((e) => logger.debug("Could not send menu click to tab, it might have been closed.", e));
     }
 });
 
@@ -286,7 +287,7 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
             chrome.tabs.sendMessage(notifInfo.tabId, {
                 action: "GM_notificationClick",
                 notificationId: notificationId.split('::').pop()
-            }).catch((e) => console.debug("Could not send notification click to tab", e));
+            }).catch((e) => logger.debug("Could not send notification click to tab", e));
         }
         
         chrome.notifications.clear(notificationId);
@@ -307,7 +308,7 @@ chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIn
             action: "GM_notificationButton",
             notificationId: notificationId.split('::').pop(),
             buttonIndex
-        }).catch((e) => console.debug("Could not send notification button click to tab", e));
+        }).catch((e) => logger.debug("Could not send notification button click to tab", e));
     }
     
     chrome.notifications.clear(notificationId);
@@ -327,7 +328,7 @@ chrome.notifications.onClosed.addListener(async (notificationId, byUser) => {
             action: "GM_notificationClosed",
             notificationId: notificationId.split('::').pop(),
             byUser
-        }).catch((e) => console.debug("Could not send notification close to tab", e));
+        }).catch((e) => logger.debug("Could not send notification close to tab", e));
     }
     
     // Clean up storage
@@ -344,7 +345,7 @@ async function setupUpdateAlarm() {
   // Clear existing alarm and create new one with updated interval
   chrome.alarms.clear("check_updates", () => {
     chrome.alarms.create("check_updates", { periodInMinutes: intervalMinutes });
-    console.log(`Update check alarm set for every ${intervalMinutes} minutes`);
+    logger.info(`Update check alarm set for every ${intervalMinutes} minutes`);
   });
 }
 
@@ -399,7 +400,7 @@ async function configureScriptWorlds() {
                 csp: "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; object-src 'none'"
             });
         } catch (e) {
-            console.debug(`Failed to configure world for script ${script.id}:`, e);
+            logger.debug(`Failed to configure world for script ${script.id}:`, e);
         }
     }
 }
