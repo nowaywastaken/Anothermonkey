@@ -376,8 +376,8 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 setupUpdateAlarm();
 
 // Initial sync
-syncScripts()
-checkForUpdates() // Also check on startup
+syncScripts().catch(err => logger.error("Initial sync failed:", err));
+checkForUpdates().catch(err => logger.error("Initial update check failed:", err)); // Also check on startup
 
 // Configure the default User Script world
 if (chrome.userScripts && chrome.userScripts.configureWorld) {
@@ -391,7 +391,8 @@ if (chrome.userScripts && chrome.userScripts.configureWorld) {
 async function configureScriptWorlds() {
     if (!chrome.userScripts || !chrome.userScripts.configureWorld) return;
     
-    const scripts = await db.scripts.where("enabled").equals(1 as any).toArray();
+    // Dexie indexed boolean fields are stored as 0/1, use number for query
+    const scripts = await db.scripts.where("enabled").equals(1).toArray();
     for (const script of scripts) {
         try {
             await chrome.userScripts.configureWorld({

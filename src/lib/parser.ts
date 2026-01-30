@@ -1,5 +1,39 @@
 import type { ScriptMetadata } from "./types";
 
+// Allowed URL protocols for @require and @resource
+const ALLOWED_PROTOCOLS = ['https:', 'http:', 'data:'];
+
+/**
+ * Validates a URL for security concerns
+ * @returns true if URL is safe, false otherwise
+ */
+function isValidUrl(urlString: string): boolean {
+  // Allow data: URLs for inline resources
+  if (urlString.startsWith('data:')) return true;
+  
+  try {
+    const url = new URL(urlString);
+    return ALLOWED_PROTOCOLS.includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates @match pattern format
+ */
+function isValidMatchPattern(pattern: string): boolean {
+  // Special patterns
+  if (pattern === '<all_urls>' || pattern === '*') return true;
+  
+  // Regex patterns are allowed
+  if (pattern.startsWith('/') && pattern.endsWith('/')) return true;
+  
+  // Standard match pattern: scheme://host/path
+  const matchPatternRegex = /^(\*|https?|file|ftp):\/\/([\w*.\-]+|\*)(\/.*)?$/;
+  return matchPatternRegex.test(pattern);
+}
+
 // Helper to create a default metadata object.
 // These are the absolute minimum defaults.
 function createDefaultMetadata(): ScriptMetadata {
@@ -78,7 +112,11 @@ export function parseMetadata(code: string): ScriptMetadata {
         break;
 
       case "match":
-        if (value) metadata.matches.push(value);
+        if (value && isValidMatchPattern(value)) {
+          metadata.matches.push(value);
+        } else if (value) {
+          console.warn(`Skipping invalid @match pattern: ${value}`);
+        }
         break;
       case "exclude":
         if (value) metadata.excludes.push(value);
@@ -90,7 +128,11 @@ export function parseMetadata(code: string): ScriptMetadata {
         if (value) metadata.connects.push(value);
         break;
       case "require":
-        if (value) metadata.requires.push(value);
+        if (value && isValidUrl(value)) {
+          metadata.requires.push(value);
+        } else if (value) {
+          console.warn(`Skipping invalid @require URL: ${value}`);
+        }
         break;
       case "grant":
         if (value) metadata.grants.push(value);
@@ -99,7 +141,12 @@ export function parseMetadata(code: string): ScriptMetadata {
       case "resource":
         const resMatch = value.match(/^(\S+)\s+(.+)$/);
         if (resMatch) {
-          const resource = { name: resMatch[1], url: resMatch[2] };
+          const resourceUrl = resMatch[2];
+          if (!isValidUrl(resourceUrl)) {
+            console.warn(`Skipping invalid @resource URL: ${resourceUrl}`);
+            break;
+          }
+          const resource = { name: resMatch[1], url: resourceUrl };
           // Prevent duplicates by name
           const existingIndex = metadata.resources.findIndex(
             (r) => r.name === resource.name,

@@ -135,7 +135,8 @@ export async function syncScripts() {
       return
     }
 
-    const dbScripts = await db.scripts.where("enabled").equals(1 as any).toArray()
+    // Dexie indexed boolean fields are stored as 0/1, use number for query
+    const dbScripts = await db.scripts.where("enabled").equals(1).toArray()
     const registeredScripts = await chrome.userScripts.getScripts()
 
     const dbScriptIds = new Set(dbScripts.map((s) => s.id))
@@ -225,16 +226,48 @@ export async function checkForUpdates(): Promise<UpdateCheckResult[]> {
     return results;
 }
 
+/**
+ * Compares two version strings to check if newVer is newer than oldVer.
+ * Handles semver-like versions including pre-release tags.
+ */
 function isNewerVersion(newVer: string, oldVer: string): boolean {
-    const n = newVer.split('.').map(Number);
-    const o = oldVer.split('.').map(Number);
+    // Handle empty or invalid versions
+    if (!newVer || !oldVer) return false;
     
+    // Split version and pre-release parts (e.g., "1.0.0-beta" -> ["1.0.0", "beta"])
+    const [newMain, newPre] = newVer.split('-');
+    const [oldMain, oldPre] = oldVer.split('-');
+    
+    // Parse main version parts
+    const parseVersion = (ver: string): number[] => {
+        return ver.split('.').map(p => {
+            const num = parseInt(p, 10);
+            return isNaN(num) ? 0 : num;
+        });
+    };
+    
+    const n = parseVersion(newMain);
+    const o = parseVersion(oldMain);
+    
+    // Compare main version parts
     for (let i = 0; i < Math.max(n.length, o.length); i++) {
         const nv = n[i] || 0;
         const ov = o[i] || 0;
         if (nv > ov) return true;
         if (nv < ov) return false;
     }
+    
+    // If main versions are equal, handle pre-release
+    // A version without pre-release is considered newer than one with pre-release
+    // e.g., "1.0.0" > "1.0.0-beta"
+    if (!newPre && oldPre) return true;
+    if (newPre && !oldPre) return false;
+    
+    // Both have pre-release, compare alphabetically
+    if (newPre && oldPre) {
+        return newPre > oldPre;
+    }
+    
     return false;
 }
 
@@ -265,12 +298,13 @@ export async function injectIntoExistingTabs(script: UserScript) {
 
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                func: (code: any) => {
+                func: (code: string) => {
                     try {
-                        eval(code as string);
-
+                        // Use Function constructor instead of eval for better security
+                        const scriptRunner = new Function(code);
+                        scriptRunner();
                     } catch (e) {
-                        logger.error("Error executing script in target world:", e);
+                        console.error("Error executing script in target world:", e);
                     }
                 },
                 args: [fullCode],

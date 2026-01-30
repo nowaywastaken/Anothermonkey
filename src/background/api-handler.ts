@@ -8,7 +8,7 @@ async function checkPermissions(scriptId: string, permission: string): Promise<b
     const script = await db.scripts.get(scriptId);
     if (!script) return false;
     // @grant none scripts can only use GM_info
-    if (permission !== "GM_info" && permission !== "GM_cookie" && (script.metadata.grants.length === 0 || script.metadata.grants[0] === 'none')) {
+    if (permission !== "GM_info" && (script.metadata.grants.length === 0 || script.metadata.grants[0] === 'none')) {
         return false;
     }
     return script.metadata.grants.includes(permission) || script.metadata.grants.includes("unsafeWindow");
@@ -129,7 +129,8 @@ export async function handleGMRequest(
                     headers: details.headers,
                     body: details.data,
                     signal: controller.signal,
-                    credentials: details.anonymous ? 'omit' : 'include',
+                    // Default to 'omit' for CSRF protection, only include credentials if explicitly requested
+                    credentials: details.withCredentials ? 'include' : 'omit',
                 });
 
                 const responseHeaders = Array.from(response.headers.entries()).map(([key, value]) => `${key}: ${value}`).join("\n");
@@ -218,9 +219,18 @@ export async function handleGMRequest(
                     tabId,
                     onclick: message.details.onclick,
                     ondone: message.details.ondone,
-                    buttons: message.details.buttons
+                    buttons: message.details.buttons,
+                    // Add timestamp for TTL cleanup
+                    createdAt: Date.now()
                 };
                 await chrome.storage.local.set({ [`notif_${notificationId}`]: notificationInfo });
+                
+                // Schedule cleanup after 5 minutes if notification callbacks weren't triggered
+                setTimeout(async () => {
+                    try {
+                        await chrome.storage.local.remove(`notif_${notificationId}`);
+                    } catch { /* ignore cleanup errors */ }
+                }, 5 * 60 * 1000);
             }
             
             // Build notification options
