@@ -97,11 +97,32 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ initialCode, onSave,
           onChange={handleChange}
           beforeMount={handleEditorWillMount}
           options={{
-            minimap: { enabled: false },
+            minimap: { enabled: true, scale: 0.8 },
             fontSize: 14,
             fontFamily: "'Fira Code', 'Menlo', 'Monaco', 'Courier New', monospace",
+            fontLigatures: true,
             scrollBeyondLastLine: false,
-            automaticLayout: true
+            automaticLayout: true,
+            bracketPairColorization: { enabled: true },
+            autoClosingBrackets: 'always',
+            autoClosingQuotes: 'always',
+            autoIndent: 'full',
+            formatOnPaste: true,
+            formatOnType: true,
+            folding: true,
+            foldingHighlight: true,
+            showFoldingControls: 'always',
+            renderLineHighlight: 'all',
+            renderWhitespace: 'selection',
+            suggestOnTriggerCharacters: true,
+            quickSuggestions: true,
+            wordWrap: 'off',
+            tabSize: 2,
+            lineNumbers: 'on',
+            glyphMargin: true,
+            smoothScrolling: true,
+            cursorBlinking: 'smooth',
+            cursorSmoothCaretAnimation: 'on',
           }}
         />
       </div>

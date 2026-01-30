@@ -270,18 +270,28 @@ export async function handleGMRequest(
             if (!tabId) return { error: "Cannot register menu command without a tab context." };
 
             const commandKey = `anmon-cmd::${scriptId}::${message.id}`;
+            const script = await db.scripts.get(scriptId);
 
             await chrome.contextMenus.create({
                 id: commandKey,
-                title: `[${(await db.scripts.get(scriptId))?.metadata.name}] ${message.caption}`,
+                title: `[${script?.metadata.name}] ${message.caption}`,
                 contexts: ["all"],
                 documentUrlPatterns: ["<all_urls>"] // Show on all pages, let the script logic decide
             });
 
-            // This is a bit tricky. We need a way to link context menu clicks back to the right tab.
-            // We'll store the scriptId and commandId in the menu item ID.
-            // The click handler will then message the appropriate tab.
-            // This is handled in background/index.ts.
+            // Save command to storage for popup to query
+            const result = await chrome.storage.local.get("menuCommands");
+            const commands = (result.menuCommands || []) as Array<{id: string, scriptId: string, caption: string, scriptName: string}>;
+            
+            // Remove existing command with same id if any
+            const filteredCommands = commands.filter(c => c.id !== message.id || c.scriptId !== scriptId);
+            filteredCommands.push({
+                id: message.id,
+                scriptId,
+                caption: message.caption,
+                scriptName: script?.metadata.name || "Unknown"
+            });
+            await chrome.storage.local.set({ menuCommands: filteredCommands });
 
             return { success: true };
         }

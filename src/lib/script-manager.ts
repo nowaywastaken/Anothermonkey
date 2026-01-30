@@ -97,14 +97,16 @@ async function buildScriptPayload(script: UserScript): Promise<{js: {code: strin
     });
     
     let finalCode = script.code;
-    const needsPreCheck = script.metadata.includes.length > 0 || script.metadata.excludes.length > 0;
+    const needsPreCheck = script.metadata.includes.length > 0 || script.metadata.excludes.length > 0 || script.metadata.noframes;
     
     if (needsPreCheck) {
         jsToInject.unshift({ code: MATCHER_CODE }); // Inject matcher logic first
         const allIncludes = JSON.stringify(script.metadata.includes);
         const allExcludes = JSON.stringify(script.metadata.excludes);
+        const noframesCheck = script.metadata.noframes ? 'if (window !== window.top) { return; }' : '';
         const wrapperStart = `
 (function() {
+${noframesCheck}
 const currentUrl = window.location.href;
 const includes = ${allIncludes};
 const excludes = ${allExcludes};

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react"
 import { type UserScript } from "~lib/types"
-import { FileCode, Power, Trash2, Plus, Search, Filter, X, Upload, CheckSquare, Square } from "lucide-react"
+import { FileCode, Power, Trash2, Plus, Search, Filter, X, Upload, Download, CheckSquare, Square } from "lucide-react"
 import clsx from "clsx"
 
 interface ScriptListProps {
@@ -11,9 +11,11 @@ interface ScriptListProps {
   onDelete: (id: string) => void
   onCreate: () => void
   onImport: () => void
+  onExport?: (id: string) => void
   onBulkEnable?: (ids: string[]) => void
   onBulkDisable?: (ids: string[]) => void
   onBulkDelete?: (ids: string[]) => void
+  onBulkExport?: (ids: string[]) => void
   darkMode?: boolean | null
 }
 
@@ -27,15 +29,24 @@ export const ScriptList: React.FC<ScriptListProps> = ({
   onDelete,
   onCreate,
   onImport,
+  onExport,
   onBulkEnable,
   onBulkDisable,
   onBulkDelete,
+  onBulkExport,
   darkMode
 }) => {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [debouncedQuery, setDebouncedQuery] = useState("")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  // Handle bulk export
+  const handleBulkExport = useCallback(() => {
+    if (onBulkExport && selectedIds.size > 0) {
+      onBulkExport(Array.from(selectedIds))
+    }
+  }, [selectedIds, onBulkExport])
 
   // Debounce search input (300ms)
   useEffect(() => {
@@ -225,6 +236,15 @@ export const ScriptList: React.FC<ScriptListProps> = ({
             >
               Delete
             </button>
+            {onBulkExport && (
+              <button
+                onClick={handleBulkExport}
+                className="px-2 py-1 text-xs rounded bg-blue-900/50 text-blue-400 hover:bg-blue-900/70 transition-colors flex items-center gap-1"
+                title="Export selected scripts"
+              >
+                <Download size={12} /> Export
+              </button>
+            )}
             <button
               onClick={handleClearSelection}
               className="px-2 py-1 text-xs rounded bg-zinc-300 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-400 dark:hover:bg-zinc-600 transition-colors"

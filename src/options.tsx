@@ -335,6 +335,53 @@ const OptionsIndex = () => {
     }
   }
 
+  // Export single script
+  const handleExport = async (id: string) => {
+    const script = await db.scripts.get(id)
+    if (!script) return
+    
+    const blob = new Blob([script.code], { type: "application/javascript" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${script.metadata.name || "script"}.user.js`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // Bulk export scripts
+  const handleBulkExport = async (ids: string[]) => {
+    const scriptsToExport = await db.scripts.bulkGet(ids)
+    const validScripts = scriptsToExport.filter((s): s is UserScript => s !== undefined)
+    
+    if (validScripts.length === 0) return
+    
+    if (validScripts.length === 1) {
+      // Single script, download directly
+      await handleExport(validScripts[0].id)
+      return
+    }
+    
+    // Multiple scripts - download each one
+    for (const script of validScripts) {
+      const blob = new Blob([script.code], { type: "application/javascript" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${script.metadata.name || script.id}.user.js`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      // Small delay between downloads
+      await new Promise(r => setTimeout(r, 100))
+    }
+    
+    alert(`Exported ${validScripts.length} script(s)`)
+  }
+
   const triggerSync = () => {
     chrome.runtime.sendMessage({ action: "sync_scripts" })
   }
@@ -455,9 +502,11 @@ const OptionsIndex = () => {
           onDelete={handleDelete}
           onCreate={handleCreate}
           onImport={handleImportClick}
+          onExport={handleExport}
           onBulkEnable={handleBulkEnable}
           onBulkDisable={handleBulkDisable}
           onBulkDelete={handleBulkDelete}
+          onBulkExport={handleBulkExport}
           darkMode={darkMode}
         />
       </>

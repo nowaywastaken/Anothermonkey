@@ -1,6 +1,14 @@
 import Dexie, { type Table } from 'dexie';
 import type { UserScript, GMValue, UserPermission, SyncItem } from './types';
 
+// Script statistics for tracking usage
+export interface ScriptStats {
+  scriptId: string;
+  runCount: number;
+  lastRun: number;
+  totalErrors: number;
+}
+
 export class AnotherMonkeyDB extends Dexie {
   // 'scripts' is a table of UserScript.
   scripts!: Table<UserScript, string>; // The string is for the 'id' property.
@@ -14,6 +22,9 @@ export class AnotherMonkeyDB extends Dexie {
 
   // 'syncItems' tracks cloud sync state
   syncItems!: Table<SyncItem, string>;
+
+  // 'scriptStats' tracks script usage statistics
+  scriptStats!: Table<ScriptStats, string>;
 
   constructor() {
     super('anothermonkey_db');
@@ -30,6 +41,15 @@ export class AnotherMonkeyDB extends Dexie {
 
       // syncItems table with simple primary key
       syncItems: 'id, scriptId',
+    });
+
+    // Version 3: Add script statistics table
+    this.version(3).stores({
+      scripts: 'id, enabled',
+      values: '&[scriptId+key]',
+      permissions: '&[scriptId+domain]',
+      syncItems: 'id, scriptId',
+      scriptStats: 'scriptId',
     });
   }
 }

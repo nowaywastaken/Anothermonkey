@@ -52,7 +52,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
       return true; // async response
   }
 
-  // Handle immediate injection into existing tabs
+   // Handle immediate injection into existing tabs
   if (msg.action === "inject_existing_tabs") {
     const scriptId = msg.scriptId as string;
     if (scriptId) {
@@ -66,6 +66,63 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
       sendResponse({ error: "Missing scriptId" });
     }
     return true; // async response
+  }
+
+  // Get menu commands for popup display
+  if (msg.action === "get_menu_commands") {
+    // Menu commands are stored as context menu items with ids like 'anmon-cmd::scriptId::commandId'
+    // We need to query context menu items, but chrome.contextMenus doesn't have a getAll method
+    // So we track them in storage when they're registered
+    chrome.storage.local.get("menuCommands").then(result => {
+      const commands = (result.menuCommands || []) as Array<{id: string, scriptId: string, caption: string}>;
+      sendResponse({ commands });
+    });
+    return true;
+  }
+
+  // Execute menu command (forward click to content script)
+  if (msg.action === "execute_menu_command") {
+    const { targetTabId, commandId } = msg as { targetTabId: number, commandId: string };
+    if (targetTabId && commandId) {
+      chrome.tabs.sendMessage(targetTabId, {
+        action: "GM_menuCommandClicked",
+        id: commandId
+      }).then(() => sendResponse({ success: true }))
+        .catch(e => sendResponse({ error: e.message }));
+    } else {
+      sendResponse({ error: "Missing targetTabId or commandId" });
+    }
+    return true;
+  }
+
+  // Record script execution (called from injected script)
+  if (msg.action === "record_script_run") {
+    const scriptId = msg.scriptId as string;
+    if (scriptId) {
+      import("../lib/script-stats").then(({ recordScriptRun }) => {
+        recordScriptRun(scriptId)
+          .then(() => sendResponse({ success: true }))
+          .catch(e => sendResponse({ error: e.message }));
+      });
+    } else {
+      sendResponse({ error: "Missing scriptId" });
+    }
+    return true;
+  }
+
+  // Record script error
+  if (msg.action === "record_script_error") {
+    const scriptId = msg.scriptId as string;
+    if (scriptId) {
+      import("../lib/script-stats").then(({ recordScriptError }) => {
+        recordScriptError(scriptId)
+          .then(() => sendResponse({ success: true }))
+          .catch(e => sendResponse({ error: e.message }));
+      });
+    } else {
+      sendResponse({ error: "Missing scriptId" });
+    }
+    return true;
   }
 })
 
