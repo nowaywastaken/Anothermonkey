@@ -169,28 +169,52 @@ export async function handleGMRequest(
     case "GM_setValue": {
       if (!(await checkPermissions(scriptId, "GM_setValue")))
         return { error: "Missing permission: GM_setValue" };
-      const { key, value } = message;
-      await db.values.put({ scriptId, key, value });
+      const { key, value, v } = message;
+      
+      // Basic conflict resolution: only update if version is missing or greater
+      const storageKey = `v_${scriptId}_${key}`;
+      const versionResult = await chrome.storage.local.get(storageKey);
+      const currentVersion = (versionResult[storageKey] as number) || 0;
+      
+      if (v === undefined || v > currentVersion) {
+        await db.values.put({ scriptId, key, value });
+        if (v !== undefined) {
+          await chrome.storage.local.set({ [storageKey]: v });
+        }
+      }
       return { success: true };
     }
     case "GM_deleteValue": {
       if (!(await checkPermissions(scriptId, "GM_deleteValue")))
         return { error: "Missing permission: GM_deleteValue" };
-      await db.values.delete([scriptId, message.key]);
+      const { key, v } = message;
+      
+      const storageKey = `v_${scriptId}_${key}`;
+      const versionResult = await chrome.storage.local.get(storageKey);
+      const currentVersion = (versionResult[storageKey] as number) || 0;
+
+      if (v === undefined || v > currentVersion) {
+        await db.values.delete([scriptId, key]);
+        if (v !== undefined) {
+          await chrome.storage.local.set({ [storageKey]: v });
+        }
+      }
       return { success: true };
     }
 
     case "GM_xmlhttpRequest": {
       if (!(await checkPermissions(scriptId, "GM_xmlhttpRequest")))
         return { error: "Missing permission: GM_xmlhttpRequest" };
+      
       const { details, requestId } = message;
+      const port = message.port;
 
       if (!(await checkConnect(scriptId, details.url))) {
         const error = {
           name: "ConnectError",
           message: `Request to ${details.url} blocked by @connect rule.`,
         };
-        message.port.postMessage({ type: "error", error });
+        port.postMessage({ type: "error", error });
 
         // Create a notification to inform the user
         const notificationId = `connect-blocked::${scriptId}::${details.url}`;
@@ -206,18 +230,58 @@ export async function handleGMRequest(
         return;
       }
 
+
+      // Identify forbidden headers that need declarativeNetRequest
+      const forbiddenHeaders = ['user-agent', 'referer', 'origin', 'host', 'cookie'];
+      const headersToModify: Record<string, string> = {};
+      const standardHeaders: Record<string, string> = {};
+
+      if (details.headers) {
+        Object.entries(details.headers).forEach(([key, value]) => {
+          if (forbiddenHeaders.includes(key.toLowerCase())) {
+            headersToModify[key] = value as string;
+          } else {
+            standardHeaders[key] = value as string;
+          }
+        });
+      }
+
       const controller = new AbortController();
       xhrControllers.set(requestId, controller);
 
-      const port = message.port; // The long-lived connection port
+      // Generate a numeric ID for DNR rule (must be >= 1)
+      const dnrRuleId = Math.abs(requestId.split('').reduce((a: number, b: string) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0)) || 1;
 
       try {
+        // Apply DNR rules for forbidden headers if any
+        if (Object.keys(headersToModify).length > 0) {
+          const rule: chrome.declarativeNetRequest.Rule = {
+            id: dnrRuleId,
+            priority: 1,
+            action: {
+              type: "modifyHeaders" as chrome.declarativeNetRequest.RuleActionType,
+              requestHeaders: Object.entries(headersToModify).map(([header, value]) => ({
+                header,
+                operation: "set" as chrome.declarativeNetRequest.HeaderOperation,
+                value
+              }))
+            },
+            condition: {
+              urlFilter: details.url,
+              resourceTypes: ["xmlhttprequest"] as chrome.declarativeNetRequest.ResourceType[]
+            }
+          };
+          await chrome.declarativeNetRequest.updateDynamicRules({
+            addRules: [rule],
+            removeRuleIds: [dnrRuleId]
+          });
+        }
+
         const response = await fetch(details.url, {
           method: details.method || "GET",
-          headers: details.headers,
+          headers: standardHeaders,
           body: details.data,
           signal: controller.signal,
-          // Default to 'omit' for CSRF protection, only include credentials if explicitly requested
           credentials: details.withCredentials ? "include" : "omit",
         });
 
@@ -226,20 +290,15 @@ export async function handleGMRequest(
           .join("\n");
 
         const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error("Could not get response reader.");
-        }
+        if (!reader) throw new Error("Could not get response reader.");
 
         const contentLength = +(response.headers.get("Content-Length") || 0);
         let loaded = 0;
-        let chunks = [];
+        const chunks = [];
 
         while (true) {
           const { done, value } = await reader.read();
-
-          if (done) {
-            break;
-          }
+          if (done) break;
 
           chunks.push(value);
           loaded += value.length;
@@ -259,17 +318,16 @@ export async function handleGMRequest(
         let responseBase64 = null;
         let responseText = null;
 
-        if (
-          details.responseType === "blob" ||
-          details.responseType === "arraybuffer"
-        ) {
+        if (details.responseType === "blob" || details.responseType === "arraybuffer") {
           isBinary = true;
           const buffer = await responseData.arrayBuffer();
           const view = new Uint8Array(buffer);
           let binaryString = "";
-          view.forEach((byte) => {
-            binaryString += String.fromCharCode(byte);
-          });
+          // Use more efficient chunked string conversion for large buffers
+          const CHUNK_SIZE = 0x8000;
+          for (let i = 0; i < view.length; i += CHUNK_SIZE) {
+            binaryString += String.fromCharCode.apply(null, Array.from(view.subarray(i, i + CHUNK_SIZE)));
+          }
           responseBase64 = btoa(binaryString);
         } else {
           responseText = await responseData.text();
@@ -297,6 +355,12 @@ export async function handleGMRequest(
         });
       } finally {
         xhrControllers.delete(requestId);
+        // Clean up DNR rule
+        if (Object.keys(headersToModify).length > 0) {
+          chrome.declarativeNetRequest.updateDynamicRules({
+            removeRuleIds: [dnrRuleId]
+          }).catch(err => console.debug("Clean up DNR rule failed", err));
+        }
       }
       break; // Request is handled via port messages, no direct return value
     }

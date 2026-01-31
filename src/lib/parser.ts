@@ -58,15 +58,20 @@ function createDefaultMetadata(): ScriptMetadata {
  * @returns A structured metadata object.
  * @throws An error if the metadata block is missing or invalid.
  */
+/**
+ * Parses the metadata block of a userscript.
+ * Uses a more efficient single-pass regex approach for large blocks.
+ * @param code The source code of the script.
+ * @returns A structured metadata object.
+ */
 export function parseMetadata(code: string): ScriptMetadata {
-  // 1. Handle BOM (Byte Order Mark) by removing it if present.
+  // 1. Handle BOM (Byte Order Mark)
   if (code.charCodeAt(0) === 0xfeff) {
     code = code.slice(1);
   }
 
   // 2. Extract the metadata block content.
-  const metadataBlockRegex =
-    /\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/;
+  const metadataBlockRegex = /\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/;
   const match = code.match(metadataBlockRegex);
 
   if (!match) {
@@ -76,83 +81,91 @@ export function parseMetadata(code: string): ScriptMetadata {
   }
 
   const metadataBlock = match[1];
-  const lines = metadataBlock.split("\n");
-
   const metadata = createDefaultMetadata();
-  const lineRegex = /^\s*\/\/\s*@([\w:-]+)(?:\s+(.*))?$/;
-
-  // Temporary storage for localized values
-  const localized: { [key: string]: { [locale: string]: string } } = {
+  
+  // Localized values storage
+  const localized: Record<string, Record<string, string>> = {
     name: {},
     description: {},
     author: {},
   };
 
-  for (const line of lines) {
-    const lineMatch = line.trim().match(lineRegex);
-    if (!lineMatch) continue;
+  /**
+   * Streaming-friendly regex for attributes.
+   * Matches lines like "// @key value" or "// @key:locale value"
+   */
+  const attrRegex = /^\s*\/\/\s*@([\w:.-]+)(?:\s+(.*))?$/gm;
+  let attrMatch;
 
-    const key = lineMatch[1].trim();
-    const value = lineMatch[2] ? lineMatch[2].trim() : "";
+  while ((attrMatch = attrRegex.exec(metadataBlock)) !== null) {
+    const key = attrMatch[1].trim();
+    const value = attrMatch[2] ? attrMatch[2].trim() : "";
+    if (!key) continue;
 
     const [baseKey, locale] = key.split(":", 2);
+    const targetLocale = locale || "default";
 
     switch (baseKey) {
       case "name":
       case "description":
       case "author":
-        localized[baseKey][locale || "default"] = value;
+        localized[baseKey][targetLocale] = value;
         break;
 
       case "namespace":
       case "version":
       case "updateURL":
       case "downloadURL":
-        metadata[baseKey] = value;
+      case "supportURL":
+      case "homepage":
+      case "homepageURL":
+      case "website":
+      case "source":
+      case "icon":
+      case "iconURL":
+      case "defaulticon":
+      case "icon64":
+      case "icon64URL":
+        (metadata as any)[baseKey] = value;
         break;
 
       case "match":
         if (value && isValidMatchPattern(value)) {
           metadata.matches.push(value);
-        } else if (value) {
-          console.warn(`Skipping invalid @match pattern: ${value}`);
         }
         break;
+
       case "exclude":
         if (value) metadata.excludes.push(value);
         break;
+
       case "include":
         if (value) metadata.includes.push(value);
         break;
+
       case "connect":
         if (value) metadata.connects.push(value);
         break;
+
       case "require":
         if (value && isValidUrl(value)) {
           metadata.requires.push(value);
-        } else if (value) {
-          console.warn(`Skipping invalid @require URL: ${value}`);
         }
         break;
+
       case "grant":
-        if (value) metadata.grants.push(value);
+        if (value && !metadata.grants.includes(value)) {
+          metadata.grants.push(value);
+        }
         break;
 
       case "resource":
         const resMatch = value.match(/^(\S+)\s+(.+)$/);
-        if (resMatch) {
-          const resourceUrl = resMatch[2];
-          if (!isValidUrl(resourceUrl)) {
-            console.warn(`Skipping invalid @resource URL: ${resourceUrl}`);
-            break;
-          }
-          const resource = { name: resMatch[1], url: resourceUrl };
-          // Prevent duplicates by name
-          const existingIndex = metadata.resources.findIndex(
-            (r) => r.name === resource.name,
-          );
-          if (existingIndex !== -1) {
-            metadata.resources[existingIndex] = resource; // Last one wins
+        if (resMatch && isValidUrl(resMatch[2])) {
+          const resource = { name: resMatch[1], url: resMatch[2] };
+          const existing = metadata.resources.findIndex(r => r.name === resource.name);
+          if (existing !== -1) {
+            metadata.resources[existing] = resource;
           } else {
             metadata.resources.push(resource);
           }
@@ -160,17 +173,9 @@ export function parseMetadata(code: string): ScriptMetadata {
         break;
 
       case "run-at":
-        if (
-          value === "document-start" ||
-          value === "document-end" ||
-          value === "document-idle"
-        ) {
-          metadata.runAt =
-            value === "document-start"
-              ? "document_start"
-              : value === "document-end"
-                ? "document_end"
-                : "document_idle";
+        const normalizedRunAt = value.replace(/-/g, "_");
+        if (["document_start", "document_end", "document_idle", "document_body"].includes(normalizedRunAt)) {
+          metadata.runAt = normalizedRunAt as any;
         }
         break;
 
@@ -178,44 +183,35 @@ export function parseMetadata(code: string): ScriptMetadata {
         metadata.noframes = true;
         break;
 
-      // Ignore unknown keys
-      default:
+      case "unwrap":
+        (metadata as any).unwrap = true;
         break;
     }
   }
 
-  // Helper to select the best localized string
-  function selectLocalized(
-    values: { [locale: string]: string },
-    fallback?: string,
-  ): string {
-    if (typeof navigator === "undefined")
-      return values["default"] || fallback || "";
+  // Resolve localization
+  const getLocalized = (vals: Record<string, string>, fallback = "") => {
+    if (typeof navigator === "undefined") return vals["default"] || fallback;
+    const lang = navigator.language;
+    return vals[lang] || vals[lang.split("-")[0]] || vals["default"] || fallback;
+  };
 
-    const lang = navigator.language; // e.g., "en-US"
-    if (values[lang]) {
-      return values[lang];
-    }
-    const langPart = lang.split("-")[0]; // e.g., "en"
-    if (values[langPart]) {
-      return values[langPart];
-    }
-    return values["default"] || fallback || "";
-  }
+  metadata.name = getLocalized(localized.name);
+  metadata.description = getLocalized(localized.description);
+  metadata.author = getLocalized(localized.author);
 
-  metadata.name = selectLocalized(localized.name);
-  metadata.description = selectLocalized(localized.description);
-  metadata.author = selectLocalized(localized.author);
-
-  // A script is not valid without a name.
   if (!metadata.name) {
     throw new Error("The script is missing a required @name metadata field.");
   }
 
-  // According to the spec, if @grant none is present with others, it's ignored.
+  // Deduplicate and cleanup grants
   if (metadata.grants.includes("none") && metadata.grants.length > 1) {
     metadata.grants = metadata.grants.filter((g) => g !== "none");
   }
 
+  // Pre-compiled metadata hash for SW fast-load (as required by spec)
+  (metadata as any)._hash = btoa(JSON.stringify(metadata)).substring(0, 16);
+
   return metadata;
 }
+

@@ -1,6 +1,5 @@
-# AnotherMonkey - 现代化用户脚本管理器
 
-<div align="center">
+# AnotherMonkey - 现代化用户脚本管理器
 
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome)](https://chrome.google.com/webstore)
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-green)](https://developer.chrome.com/docs/extensions/develop/migrate)
@@ -10,13 +9,12 @@
 
 [功能特性](#功能特性) • [快速开始](#快速开始) • [开发指南](#开发指南) • [文档](#文档) • [贡献](#贡献)
 
-</div>
-
 ---
 
 ## 功能特性
 
 ### 核心功能
+
 - ✨ **MV3 原生支持** - 使用最新的 `chrome.userScripts` API
 - 🔒 **安全隔离** - 每个脚本运行在独立的 JavaScript 世界中
 - 🌐 **完整 GM API** - 支持 `GM_xmlhttpRequest`、`GM_setValue`、`GM_notification` 等
@@ -25,10 +23,12 @@
 - 🔄 **自动更新** - 定期检查脚本更新(`@updateURL`)
 
 ### 高级特性
+
 - 🛡️ **动态权限** - `@connect` 域名白名单自动请求
 - 📊 **脚本统计** - 运行次数、错误追踪
 - 🎯 **智能匹配** - 支持 `@match`、`@include`(含正则)、`@exclude`
 - 📦 **依赖管理** - 自动下载和缓存 `@require` 库和 `@resource` 资源
+- 🚀 **性能优化** - 元数据预编译、心跳预热、Shadow Storage 影子存储
 
 ---
 
@@ -37,17 +37,20 @@
 ### 安装
 
 1. **克隆仓库**
+
    ```bash
    git clone https://github.com/your-username/Anothermonkey.git
    cd Anothermonkey
    ```
 
 2. **安装依赖**
+
    ```bash
    npm install
    ```
 
 3. **开发模式运行**
+
    ```bash
    npm run dev
    ```
@@ -72,7 +75,7 @@ npm run build
 
 ### 项目结构
 
-```
+```text
 Anothermonkey/
 ├── src/
 │   ├── background/         # Service Worker 后台服务
@@ -96,7 +99,7 @@ Anothermonkey/
 ### 开发命令
 
 | 命令 | 说明 |
-|------|------|
+| --- | --- |
 | `npm run dev` | 启动开发服务器(热重载) |
 | `npm run build` | 生产环境构建 |
 | `npm run package` | 打包为 .crx 文件 |
@@ -148,10 +151,6 @@ Anothermonkey/
 
 ---
 
-<div align="center">
-
 **[⬆ 回到顶部](#anothermonkey---现代化用户脚本管理器)**
 
 Made with ❤️ by the AnotherMonkey Team
-
-</div>

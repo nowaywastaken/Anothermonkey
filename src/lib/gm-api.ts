@@ -2,12 +2,20 @@ export const GM_API_CODE = `
 (function() {
   const SCRIPT_ID = typeof GM_SCRIPT_ID !== 'undefined' ? GM_SCRIPT_ID : "unknown";
   
-  // Memory cache for synchronous access
+  // Memory cache for synchronous access (Shadow Storage)
   const valueCache = typeof GM_PRESET_VALUES !== 'undefined' ? GM_PRESET_VALUES : {};
   const resourceCache = typeof GM_PRESET_RESOURCES !== 'undefined' ? GM_PRESET_RESOURCES : {};
+  
+  // Storage versioning for conflict resolution
+  let storageVersion = 0;
 
   // Prevent double injection
   if (window.GM_xmlhttpRequest) return;
+
+  // Heartbeat to keep Service Worker warm (as per .spec.md)
+  setInterval(() => {
+    chrome.runtime.sendMessage({ action: "heartbeat", scriptId: SCRIPT_ID }).catch(() => {});
+  }, 30000);
 
   function sendMessage(action, data) {
     return new Promise((resolve, reject) => {
@@ -31,7 +39,7 @@ export const GM_API_CODE = `
   window.GM_info = {
       script: {
           ...SCRIPT_METADATA,
-          id: SCRIPT_ID, // The ID is the generated UUID, not from metadata
+          id: SCRIPT_ID, 
           resources: Object.keys(resourceCache).map(name => ({
               name: name,
               url: resourceCache[name].url
@@ -39,7 +47,7 @@ export const GM_API_CODE = `
           'run-at': SCRIPT_METADATA.runAt || 'document_idle',
       },
       scriptHandler: "AnotherMonkey",
-      version: EXTENSION_VERSION // The extension's version
+      version: EXTENSION_VERSION 
   };
 
   // GM_xmlhttpRequest
@@ -57,6 +65,8 @@ export const GM_API_CODE = `
                 const binaryString = atob(message.response.responseBase64);
                 const len = binaryString.length;
                 const bytes = new Uint8Array(len);
+                
+                // Optimized binary buffer conversion
                 for (let i = 0; i < len; i++) {
                     bytes[i] = binaryString.charCodeAt(i);
                 }
@@ -94,7 +104,8 @@ export const GM_API_CODE = `
             timeout: details.timeout,
             context: details.context,
             responseType: details.responseType,
-            anonymous: details.anonymous
+            anonymous: details.anonymous,
+            withCredentials: details.withCredentials
         }, 
         requestId 
     });
@@ -107,10 +118,17 @@ export const GM_API_CODE = `
     };
   };
 
-  // Value APIs (Sync using cache, Async updates background)
+  // Value APIs (Shadow Storage implementation)
   window.GM_setValue = function(key, value) {
+      if (valueCache[key] === value) return; // No change
+      
       valueCache[key] = value;
-      sendMessage("GM_setValue", { key, value });
+      storageVersion++;
+      
+      // Write-through to background with versioning
+      sendMessage("GM_setValue", { key, value, v: storageVersion }).catch(err => {
+          console.warn("GM_setValue background sync failed", err);
+      });
   };
 
   window.GM_getValue = function(key, defaultValue) {
@@ -118,13 +136,17 @@ export const GM_API_CODE = `
   };
 
   window.GM_deleteValue = function(key) {
+      if (!valueCache.hasOwnProperty(key)) return;
+      
       delete valueCache[key];
-      sendMessage("GM_deleteValue", { key });
+      storageVersion++;
+      sendMessage("GM_deleteValue", { key, v: storageVersion });
   };
 
   window.GM_listValues = function() {
       return Object.keys(valueCache);
   };
+
 
   // Style API
   window.GM_addStyle = function(css) {

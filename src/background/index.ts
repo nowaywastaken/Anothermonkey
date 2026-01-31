@@ -209,6 +209,12 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    // Heartbeat to keep service worker alive
+    if (msg.action === "heartbeat") {
+      sendResponse({ success: true });
+      return false; // No need for return true as it's sync
+    }
+
     // Configure auto-sync settings
     if (msg.action === "configure_auto_sync") {
       const { enabled, intervalMinutes } = msg as {
