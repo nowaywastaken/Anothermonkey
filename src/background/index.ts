@@ -2,7 +2,17 @@ import {
   syncScripts,
   checkForUpdates,
   injectIntoExistingTabs,
+  refreshScriptDependencies,
 } from "../lib/script-manager";
+import {
+  getAuthToken,
+  findBackupFile,
+  uploadBackup,
+  performCloudBackup,
+  getAutoSyncEnabled,
+  getSyncIntervalMinutes,
+  configureAutoSync,
+} from "../lib/cloud-sync";
 import { db } from "../lib/db";
 import { handleGMRequest, xhrControllers, downloadPorts } from "./api-handler";
 import { logger } from "../lib/logger";
@@ -10,8 +20,30 @@ import { logger } from "../lib/logger";
 // Service Worker initialization
 try {
   logger.info("AnotherMonkey Background Service Starting...");
+  
+  // Refresh stale dependencies on startup
+  refreshStaleDependencies().catch(err => {
+    logger.warn("Failed to refresh stale dependencies on startup:", err);
+  });
 } catch (error) {
   console.error("Failed to initialize background service:", error);
+}
+
+/**
+ * Refreshes stale dependencies for all scripts on startup
+ */
+async function refreshStaleDependencies(): Promise<void> {
+  const scripts = await db.scripts.where("enabled").equals(1).toArray();
+  
+  for (const script of scripts) {
+    try {
+      await refreshScriptDependencies(script.id);
+    } catch (err) {
+      logger.warn(`Failed to refresh dependencies for script ${script.id}:`, err);
+    }
+  }
+  
+  logger.info(`Refreshed dependencies for ${scripts.length} enabled scripts`);
 }
 
 // Type for notification info stored in storage
@@ -149,6 +181,53 @@ chrome.runtime.onMessage.addListener(
       } else {
         sendResponse({ error: "Missing scriptId" });
       }
+      return true;
+    }
+
+    // Get all script statistics
+    if (msg.action === "get_all_stats") {
+      import("../lib/script-stats").then(({ getAllScriptStats }) => {
+        getAllScriptStats()
+          .then((stats) => sendResponse({ success: true, stats }))
+          .catch((e) => sendResponse({ error: e.message }));
+      });
+      return true;
+    }
+
+    // Get statistics for a specific script
+    if (msg.action === "get_script_stats") {
+      const scriptId = msg.scriptId as string;
+      if (scriptId) {
+        import("../lib/script-stats").then(({ getScriptStats }) => {
+          getScriptStats(scriptId)
+            .then((stats) => sendResponse({ success: true, stats }))
+            .catch((e) => sendResponse({ error: e.message }));
+        });
+      } else {
+        sendResponse({ error: "Missing scriptId" });
+      }
+      return true;
+    }
+
+    // Configure auto-sync settings
+    if (msg.action === "configure_auto_sync") {
+      const { enabled, intervalMinutes } = msg as {
+        enabled: boolean;
+        intervalMinutes?: number;
+      };
+      configureAutoSync(enabled, intervalMinutes)
+        .then(() => sendResponse({ status: "success" }))
+        .catch((e) => sendResponse({ error: e.message }));
+      return true;
+    }
+
+    // Get auto-sync status
+    if (msg.action === "get_auto_sync_status") {
+      Promise.all([getAutoSyncEnabled(), getSyncIntervalMinutes()])
+        .then(([enabled, intervalMinutes]) => {
+          sendResponse({ success: true, enabled, intervalMinutes });
+        })
+        .catch((e) => sendResponse({ error: e.message }));
       return true;
     }
   },
@@ -290,10 +369,21 @@ function initializeDownloadsAPI() {
 // Initialize downloads API
 initializeDownloadsAPI();
 
-// Listen for alarms (for periodic update checks)
+// Listen for alarms (for periodic update checks and cloud sync)
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "check_updates") {
     checkForUpdates();
+  }
+  
+  // Handle cloud sync alarm
+  if (alarm.name === "cloud_sync_backup") {
+    getAutoSyncEnabled().then((enabled) => {
+      if (enabled) {
+        performCloudBackup().catch((error) => {
+          console.error("Auto-sync backup failed:", error);
+        });
+      }
+    });
   }
 });
 

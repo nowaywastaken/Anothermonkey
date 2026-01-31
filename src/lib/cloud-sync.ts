@@ -5,6 +5,19 @@ import { encryptData, decryptData, isEncrypted } from "./crypto-utils"
 const BACKUP_FILENAME = "anothermonkey_backup.json"
 const ENCRYPTED_BACKUP_FILENAME = "anothermonkey_backup.enc"
 
+// Sync alarm name
+const SYNC_ALARM_NAME = "cloud_sync_backup";
+
+// Default sync interval in minutes (24 hours = 1440 minutes)
+const DEFAULT_SYNC_INTERVAL_MINUTES = 1440;
+
+// Sync frequency options in minutes
+const SYNC_FREQUENCY_OPTIONS = [
+  { value: 60, label: "Hourly" },
+  { value: 1440, label: "Daily" },
+  { value: 10080, label: "Weekly" }
+];
+
 export interface CloudBackupData {
     version: number;
     timestamp: number;
@@ -145,6 +158,97 @@ export async function downloadBackup(token: string, fileId: string, encryptionPa
     }
     
     return JSON.parse(rawData);
+}
+
+/**
+ * Performs a cloud backup and updates the last sync timestamp
+ */
+export async function performCloudBackup(): Promise<void> {
+    try {
+        const token = await getAuthToken(true);
+        const fileId = await findBackupFile(token);
+        await uploadBackup(token, fileId);
+        // Update last sync timestamp
+        await chrome.storage.local.set({ lastCloudSyncTimestamp: Date.now() });
+    } catch (error) {
+        console.error("Auto-backup failed:", error);
+        throw error;
+    }
+}
+
+/**
+ * Sets up the periodic sync alarm
+ * @param intervalMinutes The interval in minutes for the sync alarm
+ */
+export function setupSyncAlarm(intervalMinutes: number): void {
+    // Clear existing alarm first
+    chrome.alarms.clear(SYNC_ALARM_NAME, () => {
+        // Create new periodic alarm
+        chrome.alarms.create(SYNC_ALARM_NAME, { periodInMinutes: intervalMinutes });
+        console.log(`Cloud sync alarm set for every ${intervalMinutes} minutes`);
+    });
+}
+
+/**
+ * Clears the scheduled sync alarm
+ */
+export function clearSyncAlarm(): void {
+    chrome.alarms.clear(SYNC_ALARM_NAME, () => {
+        console.log("Cloud sync alarm cleared");
+    });
+}
+
+/**
+ * Gets the current sync interval from storage
+ */
+export async function getSyncIntervalMinutes(): Promise<number> {
+    const result = await chrome.storage.local.get("syncIntervalMinutes");
+    return (result.syncIntervalMinutes as number) || DEFAULT_SYNC_INTERVAL_MINUTES;
+}
+
+/**
+ * Gets the auto-sync enabled status from storage
+ */
+export async function getAutoSyncEnabled(): Promise<boolean> {
+    const result = await chrome.storage.local.get("autoSyncEnabled");
+    return result.autoSyncEnabled === true;
+}
+
+/**
+ * Saves the auto-sync enabled status to storage
+ */
+export async function setAutoSyncEnabled(enabled: boolean): Promise<void> {
+    await chrome.storage.local.set({ autoSyncEnabled: enabled });
+}
+
+/**
+ * Saves the sync interval to storage and updates the alarm
+ */
+export async function setSyncIntervalMinutes(intervalMinutes: number): Promise<void> {
+    await chrome.storage.local.set({ syncIntervalMinutes: intervalMinutes });
+}
+
+/**
+ * Gets the last sync timestamp from storage
+ */
+export async function getLastSyncTimestamp(): Promise<number | null> {
+    const result = await chrome.storage.local.get("lastCloudSyncTimestamp");
+    return (result.lastCloudSyncTimestamp as number) || null;
+}
+
+/**
+ * Configures auto-sync with the given settings
+ */
+export async function configureAutoSync(enabled: boolean, intervalMinutes?: number): Promise<void> {
+    await setAutoSyncEnabled(enabled);
+    
+    if (enabled) {
+        const interval = intervalMinutes || await getSyncIntervalMinutes();
+        await setSyncIntervalMinutes(interval);
+        setupSyncAlarm(interval);
+    } else {
+        clearSyncAlarm();
+    }
 }
 
 /**

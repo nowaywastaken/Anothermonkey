@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef, useCallback } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { db } from "~lib/db"
 import { parseMetadata } from "~lib/parser"
+import { fetchScriptDependencies, fromLegacyCacheFormat, toLegacyCacheFormat, DEFAULT_DEPENDENCY_TTL, type CachedDependency } from "~lib/dependency-cache"
 import { ScriptList } from "~components/ScriptList"
 import { ScriptEditor } from "~components/ScriptEditor"
+import { ToastProvider, useToast } from "~components/Toast"
 import { type UserScript } from "~lib/types"
 import { bulkEnable, bulkDisable, bulkDelete, checkForUpdates, getLastUpdateCheck, checkScriptUpdate, updateScript, type UpdateCheckResult } from "~lib/script-manager"
-import { Moon, Sun, Cloud, CloudDownload, CloudUpload, RefreshCw } from "lucide-react"
-import { getAuthToken, findBackupFile, uploadBackup, downloadBackup, restoreFromBackup } from "~lib/cloud-sync"
+import { Moon, Sun, Cloud, CloudDownload, CloudUpload, RefreshCw, BarChart3, Clock, Settings } from "lucide-react"
+import { getAuthToken, findBackupFile, uploadBackup, downloadBackup, restoreFromBackup, getAutoSyncEnabled, getSyncIntervalMinutes, getLastSyncTimestamp, configureAutoSync, SYNC_FREQUENCY_OPTIONS } from "~lib/cloud-sync"
 import { logger } from "~lib/logger"
 
 import "~style.css"
@@ -29,7 +31,8 @@ const DEFAULT_SCRIPT = `// ==UserScript==
 })();
 `
 
-const OptionsIndex = () => {
+const OptionsIndexInner = () => {
+  const { addToast } = useToast()
   const scripts = useLiveQuery(() => db.scripts.toArray(), []) || []
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedScript, setSelectedScript] = useState<UserScript | null>(null)
@@ -48,9 +51,23 @@ const OptionsIndex = () => {
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
 
+  // Auto-sync configuration state
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
+  const [syncIntervalMinutes, setSyncIntervalMinutes] = useState(1440)
+  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<number | null>(null)
+  const [isLoadingSyncSettings, setIsLoadingSyncSettings] = useState(true)
+
   // Dark mode state
   const [darkMode, setDarkMode] = useState<boolean | null>(null)
   const [isDarkModeInitialized, setIsDarkModeInitialized] = useState(false)
+
+  // Active tab state (scripts, stats)
+  const [activeTab, setActiveTab] = useState<'scripts' | 'stats'>('scripts')
+
+  // Stats state
+  const [stats, setStats] = useState<Array<{ scriptId: string; runCount: number; lastRun: number; totalErrors: number }>>([])
+  const [isLoadingStats, setIsLoadingStats] = useState(false)
+  const [scriptIdToNameMap, setScriptIdToNameMap] = useState<Record<string, string>>({})
 
   // Load selected script content
   useEffect(() => {
@@ -70,6 +87,27 @@ const OptionsIndex = () => {
   useEffect(() => {
     getLastUpdateCheck().then(setLastUpdateCheck)
   }, [])
+
+  // Load auto-sync settings
+  useEffect(() => {
+    const loadSyncSettings = async () => {
+      try {
+        const [enabled, interval, lastSync] = await Promise.all([
+          getAutoSyncEnabled(),
+          getSyncIntervalMinutes(),
+          getLastSyncTimestamp()
+        ]);
+        setAutoSyncEnabled(enabled);
+        setSyncIntervalMinutes(interval);
+        setLastSyncTimestamp(lastSync);
+      } catch (error) {
+        console.error("Failed to load sync settings:", error);
+      } finally {
+        setIsLoadingSyncSettings(false);
+      }
+    };
+    loadSyncSettings();
+  }, []);
 
   // Dark mode initialization and effect
   useEffect(() => {
@@ -193,6 +231,15 @@ const OptionsIndex = () => {
         (s) => s.metadata.name === metadata.name && s.metadata.namespace === metadata.namespace
       )
 
+      // Auto-fetch dependencies if any
+      const dependencyCache = await fetchScriptDependencies(
+        metadata.requires,
+        metadata.resources,
+        duplicate?.dependencyCache ? fromLegacyCacheFormat(duplicate.dependencyCache) : {},
+        DEFAULT_DEPENDENCY_TTL
+      )
+      const legacyCacheFormat = toLegacyCacheFormat(dependencyCache)
+
       if (duplicate) {
         const overwrite = window.confirm(
           `A script with the name "${metadata.name}" already exists.\n\nDo you want to overwrite it?`
@@ -203,7 +250,8 @@ const OptionsIndex = () => {
         await db.scripts.update(duplicate.id, {
           code,
           metadata,
-          lastModified: Date.now()
+          lastModified: Date.now(),
+          dependencyCache: legacyCacheFormat
         })
       } else {
         // Add new script
@@ -213,7 +261,8 @@ const OptionsIndex = () => {
           code,
           enabled: true,
           lastModified: Date.now(),
-          metadata
+          metadata,
+          dependencyCache: legacyCacheFormat
         })
       }
 
@@ -245,38 +294,28 @@ const OptionsIndex = () => {
     try {
       const metadata = parseMetadata(code)
 
+      // Get existing cache and convert to new format for processing
+      const existingCache = selectedScript?.dependencyCache 
+        ? fromLegacyCacheFormat(selectedScript.dependencyCache)
+        : {};
+
       // Fetch new dependencies if any
-      const newDeps: Record<string, string> = { ...(selectedScript?.dependencyCache || {}) }
-      const toFetch: string[] = []
-
-      metadata.requires.forEach(url => {
-        if (!newDeps[url]) toFetch.push(url)
-      })
-      metadata.resources.forEach(res => {
-        if (!newDeps[res.url]) toFetch.push(res.url)
-      })
-
-      if (toFetch.length > 0) {
-        await Promise.all(toFetch.map(async (url) => {
-          try {
-            const res = await fetch(url)
-            if (res.ok) {
-              newDeps[url] = await res.text()
-            }
-          } catch (e) {
-            logger.error("Failed to fetch dependency:", url, e)
-          }
-        }))
-      }
+      const newCache = await fetchScriptDependencies(
+        metadata.requires,
+        metadata.resources,
+        existingCache,
+        DEFAULT_DEPENDENCY_TTL
+      );
+      const legacyCacheFormat = toLegacyCacheFormat(newCache);
 
       await db.scripts.update(selectedId, {
         code,
         metadata,
         lastModified: Date.now(),
-        dependencyCache: newDeps
+        dependencyCache: legacyCacheFormat
       })
       // Update local state to clear dirty flag
-      setSelectedScript(prev => prev ? ({ ...prev, code, metadata, dependencyCache: newDeps }) : null)
+      setSelectedScript(prev => prev ? ({ ...prev, code, metadata, dependencyCache: legacyCacheFormat }) : null)
       setIsDirty(false)
       triggerSync()
     } catch (e) {
@@ -357,15 +396,22 @@ const OptionsIndex = () => {
     const scriptsToExport = await db.scripts.bulkGet(ids)
     const validScripts = scriptsToExport.filter((s): s is UserScript => s !== undefined)
     
-    if (validScripts.length === 0) return
+    if (validScripts.length === 0) {
+      addToast({ type: 'warning', title: 'No scripts selected', message: 'Please select scripts to export' })
+      return
+    }
     
     if (validScripts.length === 1) {
       // Single script, download directly
       await handleExport(validScripts[0].id)
+      addToast({ type: 'success', title: 'Script exported', message: `${validScripts[0].metadata.name} has been exported` })
       return
     }
     
-    // Multiple scripts - download each one
+    // Multiple scripts - show progress and download each one
+    addToast({ type: 'info', title: 'Exporting scripts', message: `Exporting ${validScripts.length} script(s)...`, duration: 10000 })
+    
+    let exportedCount = 0
     for (const script of validScripts) {
       const blob = new Blob([script.code], { type: "application/javascript" })
       const url = URL.createObjectURL(blob)
@@ -376,11 +422,12 @@ const OptionsIndex = () => {
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
+      exportedCount++
       // Small delay between downloads
       await new Promise(r => setTimeout(r, 100))
     }
     
-    alert(`Exported ${validScripts.length} script(s)`)
+    addToast({ type: 'success', title: 'Export complete', message: `Successfully exported ${exportedCount} script(s)` })
   }
 
   const triggerSync = () => {
@@ -438,6 +485,43 @@ const OptionsIndex = () => {
     return date.toLocaleString()
   }
 
+  // Fetch stats when stats tab is active
+  useEffect(() => {
+    if (activeTab === 'stats') {
+      setIsLoadingStats(true)
+      // Build script ID to name map
+      const idToName: Record<string, string> = {}
+      scripts.forEach(s => {
+        idToName[s.id] = s.metadata.name || 'Unnamed Script'
+      })
+      setScriptIdToNameMap(idToName)
+      
+      chrome.runtime.sendMessage({ action: 'get_all_stats' }, (response) => {
+        setIsLoadingStats(false)
+        if (response && response.success) {
+          setStats(response.stats || [])
+        }
+      })
+    }
+  }, [activeTab, scripts])
+
+  const formatLastRun = (timestamp: number): string => {
+    if (!timestamp) return 'Never'
+    
+    const now = Date.now()
+    const diff = now - timestamp
+    
+    const seconds = Math.floor(diff / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const hours = Math.floor(minutes / 60)
+    const days = Math.floor(hours / 24)
+    
+    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`
+    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`
+    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`
+    return 'Just now'
+  }
+
   const handleCloudBackup = async () => {
     setIsSyncing(true)
     setSyncStatus("Authenticating...")
@@ -475,6 +559,7 @@ const OptionsIndex = () => {
       const backupData = await downloadBackup(token, fileId)
       setSyncStatus("Restoring data...")
       await restoreFromBackup(backupData)
+      setLastSyncTimestamp(Date.now());
       alert("Successfully restored from Google Drive!")
       triggerSync() // Sync with browser registry
     } catch (error: any) {
@@ -484,6 +569,25 @@ const OptionsIndex = () => {
       setSyncStatus(null)
     }
   }
+
+  // Handle auto-sync toggle
+  const handleAutoSyncToggle = async (enabled: boolean) => {
+    setAutoSyncEnabled(enabled);
+    await configureAutoSync(enabled);
+  };
+
+  // Handle sync frequency change
+  const handleSyncFrequencyChange = async (intervalMinutes: number) => {
+    setSyncIntervalMinutes(intervalMinutes);
+    await configureAutoSync(autoSyncEnabled, intervalMinutes);
+  };
+
+  // Format last sync time
+  const formatLastSyncTime = () => {
+    if (!lastSyncTimestamp) return "Never";
+    const date = new Date(lastSyncTimestamp);
+    return date.toLocaleString();
+  };
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans">
@@ -512,8 +616,38 @@ const OptionsIndex = () => {
         />
       </>
       <div className="flex-1 h-full flex flex-col">
-        {/* Update Section */}
-        <div className="bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 p-4">
+        {/* Tab Switcher */}
+        <div className="bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 p-2">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveTab('scripts')}
+              className={`px-4 py-2 rounded-md transition-colors ${
+                activeTab === 'scripts'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-zinc-700'
+              }`}
+            >
+              Scripts
+            </button>
+            <button
+              onClick={() => setActiveTab('stats')}
+              className={`px-4 py-2 rounded-md transition-colors flex items-center gap-2 ${
+                activeTab === 'stats'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-zinc-700'
+              }`}
+            >
+              <BarChart3 size={16} />
+              Statistics
+            </button>
+          </div>
+        </div>
+        
+        {/* Scripts Tab Content */}
+        {activeTab === 'scripts' && (
+          <>
+            {/* Update Section */}
+            <div className="bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Script Updates</h2>
@@ -552,6 +686,49 @@ const OptionsIndex = () => {
               {isSyncing && (
                 <span className="text-xs text-sky-500 animate-pulse ml-2 px-2 py-1 bg-sky-500/10 rounded-full">
                   {syncStatus}
+                </span>
+              )}
+            </div>
+
+            {/* Auto-Sync Configuration */}
+            <div className="flex items-center gap-4 ml-4 pl-4 border-l border-zinc-200 dark:border-zinc-800">
+              <Settings size={16} className="text-zinc-500 dark:text-zinc-400" />
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoSyncEnabled}
+                    onChange={(e) => handleAutoSyncToggle(e.target.checked)}
+                    className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-zinc-700 dark:text-zinc-300">Auto-sync</span>
+                </label>
+              </div>
+              
+              {autoSyncEnabled && (
+                <>
+                  <select
+                    value={syncIntervalMinutes}
+                    onChange={(e) => handleSyncFrequencyChange(Number(e.target.value))}
+                    className="text-sm border border-zinc-300 dark:border-zinc-600 rounded-md px-2 py-1 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                  >
+                    {SYNC_FREQUENCY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  
+                  <div className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    <Clock size={12} />
+                    <span>Last: {formatLastSyncTime()}</span>
+                  </div>
+                </>
+              )}
+              
+              {!isLoadingSyncSettings && !autoSyncEnabled && (
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Enable auto-sync for scheduled backups
                 </span>
               )}
             </div>
@@ -607,22 +784,81 @@ const OptionsIndex = () => {
               Error: {updateError}
             </div>
           )}
-        </div>
+          </div>
+          </>
+        )}
         
         <div className="flex-1 h-full overflow-hidden">
-          {selectedScript ? (
-            <ScriptEditor
-              key={selectedScript.id} // Re-mount on ID change to reset editor state if needed
-              initialCode={selectedScript.code}
-              onSave={handleSave}
-              onChange={handleEditorChange}
-              isDirty={isDirty}
-              isSaving={isSaving}
-              darkMode={darkMode}
-            />
+          {activeTab === 'scripts' ? (
+            selectedScript ? (
+              <ScriptEditor
+                key={selectedScript.id} // Re-mount on ID change to reset editor state if needed
+                initialCode={selectedScript.code}
+                onSave={handleSave}
+                onChange={handleEditorChange}
+                isDirty={isDirty}
+                isSaving={isSaving}
+                darkMode={darkMode}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-zinc-600 dark:text-zinc-500">
+                Select a script to edit
+              </div>
+            )
           ) : (
-            <div className="flex items-center justify-center h-full text-zinc-600 dark:text-zinc-500">
-              Select a script to edit
+            /* Statistics Tab */
+            <div className="h-full overflow-auto p-6">
+              <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-6">Script Statistics</h2>
+              
+              {isLoadingStats ? (
+                <div className="flex items-center justify-center h-64">
+                  <RefreshCw size={24} className="animate-spin text-zinc-400" />
+                </div>
+              ) : stats.length === 0 ? (
+                <div className="text-center py-12 text-zinc-500 dark:text-zinc-400">
+                  <BarChart3 size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>No script statistics yet.</p>
+                  <p className="text-sm mt-2">Scripts will be tracked once they are executed.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {stats.map((stat) => (
+                    <div
+                      key={stat.scriptId}
+                      className="bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 p-4"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
+                          {scriptIdToNameMap[stat.scriptId] || stat.scriptId}
+                        </h3>
+                        <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                          {formatLastRun(stat.lastRun)}
+                        </span>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-zinc-50 dark:bg-zinc-700/50 rounded-md p-3">
+                          <div className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+                            {stat.runCount}
+                          </div>
+                          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                            Runs
+                          </div>
+                        </div>
+                        
+                        <div className="bg-zinc-50 dark:bg-zinc-700/50 rounded-md p-3">
+                          <div className={`text-2xl font-semibold ${stat.totalErrors > 0 ? 'text-red-500 dark:text-red-400' : 'text-zinc-900 dark:text-zinc-100'}`}>
+                            {stat.totalErrors}
+                          </div>
+                          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                            Errors
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -630,5 +866,11 @@ const OptionsIndex = () => {
     </div>
   )
 }
+
+const OptionsIndex = () => (
+  <ToastProvider>
+    <OptionsIndexInner />
+  </ToastProvider>
+)
 
 export default OptionsIndex

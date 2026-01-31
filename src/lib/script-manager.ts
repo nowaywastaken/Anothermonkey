@@ -4,6 +4,13 @@ import { matchesUrl } from "./matcher";
 import type { UserScript, ScriptMetadata } from "./types";
 import { logger } from "./logger";
 import { ScriptIntegrity } from "./script-integrity";
+import {
+  fetchScriptDependencies,
+  fromLegacyCacheFormat,
+  toLegacyCacheFormat,
+  DEFAULT_DEPENDENCY_TTL,
+  type CachedDependency,
+} from "./dependency-cache";
 
 export interface UpdateCheckResult {
   scriptId: string;
@@ -137,7 +144,34 @@ if (isExcluded || !isIncluded) {
   return;
 }
 `;
-    finalCode = wrapperStart + script.code + "\n})();";
+   const statsWrapperStart = `
+(function() {
+try {
+`;
+   const statsWrapperEnd = `
+window._anmonRecordRun();
+} catch(e) {
+window._anmonRecordError();
+throw e;
+}
+})();
+`;
+   finalCode = statsWrapperStart + script.code + statsWrapperEnd;
+  } else {
+    // Wrap without pre-check
+    const statsWrapperStart = `
+(function() {
+try {
+`;
+    const statsWrapperEnd = `
+window._anmonRecordRun();
+} catch(e) {
+window._anmonRecordError();
+throw e;
+}
+})();
+`;
+    finalCode = statsWrapperStart + script.code + statsWrapperEnd;
   }
 
   jsToInject.push({ code: finalCode });
@@ -510,4 +544,41 @@ export async function updateScript(
   });
 
   await syncScripts();
+}
+
+/**
+ * Refreshes stale dependencies for a script and updates the database
+ */
+export async function refreshScriptDependencies(scriptId: string): Promise<void> {
+  const script = await db.scripts.get(scriptId);
+  if (!script) {
+    logger.warn(`Script ${scriptId} not found for dependency refresh`);
+    return;
+  }
+
+  // Convert existing cache to new format
+  const existingCache = script.dependencyCache
+    ? fromLegacyCacheFormat(script.dependencyCache)
+    : {};
+
+  // Fetch and refresh dependencies
+  const newCache = await fetchScriptDependencies(
+    script.metadata.requires,
+    script.metadata.resources,
+    existingCache,
+    DEFAULT_DEPENDENCY_TTL
+  );
+
+  // Convert back to legacy format for storage
+  const legacyCacheFormat = toLegacyCacheFormat(newCache);
+
+  // Only update if cache changed
+  const hasChanges = JSON.stringify(script.dependencyCache) !== JSON.stringify(legacyCacheFormat);
+  
+  if (hasChanges) {
+    await db.scripts.update(scriptId, {
+      dependencyCache: legacyCacheFormat,
+    });
+    logger.debug(`Updated dependency cache for script ${script.metadata.name}`);
+  }
 }

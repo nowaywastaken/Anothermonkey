@@ -315,6 +315,42 @@ export const GM_API_CODE = `
     };
   };
 
+  // GM_setClipboard
+  window.GM_setClipboard = function(text, type) {
+      // Warn if non-text type is specified (modern browsers only support text/plain)
+      if (type && type !== 'text') {
+          console.warn("GM_setClipboard: Only 'text' type is supported in modern browsers");
+      }
+      
+      // Use Clipboard API if available
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).catch((error) => {
+              console.error("GM_setClipboard error:", error);
+          });
+      } else {
+          // Fallback for older browsers using document.execCommand
+          const textArea = document.createElement('textarea');
+          textArea.value = text;
+          textArea.style.position = 'fixed';
+          textArea.style.left = '-9999px';
+          textArea.style.top = '-9999px';
+          document.body.appendChild(textArea);
+          textArea.focus();
+          textArea.select();
+          
+          try {
+              const success = document.execCommand('copy');
+              if (!success) {
+                  console.error("GM_setClipboard: execCommand('copy') failed");
+              }
+          } catch (error) {
+              console.error("GM_setClipboard error:", error);
+          } finally {
+              document.body.removeChild(textArea);
+          }
+      }
+  };
+
   // Modern GM.* API
   window.GM = window.GM || {};
   window.GM.getValue = async (key, defaultValue) => window.GM_getValue(key, defaultValue);
@@ -330,6 +366,8 @@ export const GM_API_CODE = `
   window.GM.openInTab = (url, options) => window.GM_openInTab(url, options);
   window.GM.download = (details) => window.GM_download(details);
   window.GM.cookie = (action, details, callback) => window.GM_cookie(action, details, callback);
+  window.GM.setClipboard = (text, type) => window.GM_setClipboard(text, type);
+  window.GM.unregisterMenuCommand = (id) => window.GM_unregisterMenuCommand(id);
   window.GM.info = window.GM_info;
 
   // Menu Commands
@@ -339,6 +377,13 @@ export const GM_API_CODE = `
      menuCommandListeners.set(id, onClick);
      sendMessage("GM_registerMenuCommand", { caption, id });
      return id;
+  };
+
+  window.GM_unregisterMenuCommand = function(id) {
+      if (menuCommandListeners.has(id)) {
+          menuCommandListeners.delete(id);
+          sendMessage("GM_unregisterMenuCommand", { id });
+      }
   };
 
   // Background Messages Listener
@@ -355,6 +400,20 @@ export const GM_API_CODE = `
       }
   });
 
+  // Record script run in background
+  function recordScriptRun() {
+    sendMessage("record_script_run", {});
+  }
+
+  // Record script error in background
+  function recordScriptError() {
+    sendMessage("record_script_error", {});
+  }
+
+  // Wrap script execution to record stats
+  // The actual script code will be appended after this wrapper
+  window._anmonRecordRun = recordScriptRun;
+  window._anmonRecordError = recordScriptError;
+
   console.log("GM APIs injected for script:", SCRIPT_ID);
-})();
-`;
+})();`;
