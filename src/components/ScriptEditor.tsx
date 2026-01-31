@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useCallback } from "react"
-import Editor, { type BeforeMount } from "@monaco-editor/react"
+import Editor, { type BeforeMount, loader } from "@monaco-editor/react"
 import { Save, AlertCircle, Loader2 } from "lucide-react"
+import * as monaco from "monaco-editor"
 import { GM_TYPES } from "~lib/gm-types"
+
+loader.config({ monaco })
 
 interface ScriptEditorProps {
   initialCode: string

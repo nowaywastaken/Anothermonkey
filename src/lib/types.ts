@@ -9,7 +9,7 @@ export interface ScriptMetadata {
   includes: string[];
   grants: string[];
   connects: string[];
-  runAt: 'document_start' | 'document_end' | 'document_idle';
+  runAt: "document_start" | "document_end" | "document_idle";
   noframes?: boolean;
   requires: string[];
   resources: { name: string; url: string; content?: string }[];
@@ -23,10 +23,11 @@ export interface UserScript {
   code: string;
   metadata: ScriptMetadata;
   lastModified: number;
-  preferredWorld?: 'USER_SCRIPT' | 'MAIN';
+  preferredWorld?: "USER_SCRIPT" | "MAIN";
   dependencyCache?: {
-      [url: string]: string;
+    [url: string]: string;
   };
+  lastHash?: string; // Store hash for integrity verification
 }
 
 export interface UserScriptInjection {
@@ -34,8 +35,8 @@ export interface UserScriptInjection {
   js: Array<{ code: string } | { file: string }>;
   matches?: string[];
   excludeMatches?: string[];
-  runAt?: 'document_start' | 'document_end' | 'document_idle';
-  world?: 'USER_SCRIPT' | 'MAIN';
+  runAt?: "document_start" | "document_end" | "document_idle";
+  world?: "USER_SCRIPT" | "MAIN";
 }
 
 export interface GMValue {
@@ -95,5 +96,5 @@ export interface SyncItem {
   scriptId: string;
   lastSynced: number;
   remoteId?: string;
-  status: 'synced' | 'pending' | 'conflict';
+  status: "synced" | "pending" | "conflict";
 }

@@ -16,6 +16,7 @@
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^4.2.0",
     "lucide-react": "^0.563.0",
+    "monaco-editor": "^0.55.1",
     "plasmo": "^0.90.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -40,11 +41,16 @@
       "scripting",
       "activeTab",
       "notifications",
-      "identity"
+      "identity",
+      "downloads"
     ],
-
-    "host_permissions": [
+    "optional_permissions": [
       "<all_urls>"
+    ],
+    "host_permissions": [
+      "https://*/*",
+      "http://*/*",
+      "file://*/*"
     ]
   }
 }
