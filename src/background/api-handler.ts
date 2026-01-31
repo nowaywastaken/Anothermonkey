@@ -118,6 +118,9 @@ function isPrivateIP(hostname: string): boolean {
     /^::1$/, // localhost
   ];
 
+  // Check 127.0.0.0/8 (Loopback)
+  if (/^127\./.test(host)) return true;
+
   return (
     ipv4Private.some((regex) => regex.test(host)) ||
     ipv6Private.some((regex) => regex.test(host))

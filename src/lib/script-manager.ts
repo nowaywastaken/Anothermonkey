@@ -371,10 +371,29 @@ export async function injectIntoExistingTabs(script: UserScript) {
       // If MAIN world is needed, we must specify it.
       const injectionWorld = world === "MAIN" ? "MAIN" : "ISOLATED";
 
-      // Skip immediate injection for security - let userScripts API handle it
-      // The registered scripts will be injected automatically by Chrome
-      // This avoids using Function constructor which is a security risk
-      continue;
+      // Use executeScript to inject code immediately
+      // Note: We use a function with args because MV3 doesn't support 'code' property directly.
+      // This requires the script code to be evaluated in the target context.
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        // @ts-ignore - world "USER_SCRIPT" is valid in newer Chrome types but might be missing in current definition
+        world: world === "MAIN" ? "MAIN" : "USER_SCRIPT",
+        func: (code: string) => {
+          // Determine existing globals to avoid re-declaring them if using eval directly
+          // We wrap in an IIFE to ensure scope isolation similar to standard injection
+          // But strict eval might be needed.
+          // Since user scripts are standard JS, we can use indirect eval or a new Function.
+          // However, 'world: USER_SCRIPT' is the special isolated environment for us.
+          try {
+             // We use window.eval to execute in the global scope of that world
+             window.eval(code);
+          } catch(e) { 
+             console.error("Script injection failed:", e);
+          }
+        },
+        args: [fullCode]
+      });
+
     } catch (e: any) {
       if (
         !e.message.includes("Cannot access") &&
